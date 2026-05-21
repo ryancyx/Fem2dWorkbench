@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="sdkName" value="fem2dworkbench" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="fem2dworkbench" project-jdk-type="Python SDK" />
+</project>
