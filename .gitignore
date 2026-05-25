@@ -16,3 +16,7 @@ env/
 build/
 dist/
 *.spec
+
+# Pytest temporary work dirs
+pytest_tmp/
+.pytest_tmp/
