@@ -5,7 +5,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
-from ui.backend.qml_bridge import QmlBridge
+from ui.backend.workbench_bridge import WorkbenchBridge
 
 
 def main() -> int:
@@ -13,7 +13,7 @@ def main() -> int:
 
     engine = QQmlApplicationEngine()
 
-    bridge = QmlBridge()
+    bridge = WorkbenchBridge()
     engine.rootContext().setContextProperty("bridge", bridge)
 
     qml_path = Path(__file__).resolve().parent / "ui" / "qml" / "MainWorkbench.qml"
