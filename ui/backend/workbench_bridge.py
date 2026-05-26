@@ -19,6 +19,7 @@ else:
     _USE_FALLBACK = True
 
 if _USE_FALLBACK:
+
     class QObject:
         def __init__(self) -> None:
             pass
@@ -41,22 +42,18 @@ if _USE_FALLBACK:
             return property(function)
 
         return decorator
+
 else:
     from PySide6.QtCore import QObject, Property, Signal, Slot
 
-from core.engineering.analysis_step import AnalysisStep
-from core.engineering.boundary_condition_definition import BoundaryConditionDefinition
 from core.engineering.engineering_project import EngineeringProject
-from core.engineering.geometry import GeometryModel
-from core.engineering.load_definition import LoadDefinition
-from core.engineering.material_definition import MaterialDefinition
-from core.engineering.part import Part
-from core.engineering.section import SectionDefinition
 from services.export_service import (
     export_element_results_csv,
     export_node_displacements_csv,
     export_result_summary_txt,
 )
+from services.project_factory_service import create_rectangle_plate_project
+from services.project_file_service import load_workbench_project, save_workbench_project
 from services.result_service import (
     ElementResultRow,
     NodeDisplacementRow,
@@ -71,6 +68,7 @@ from services.solve_service import WorkbenchSolveResult, solve_workbench_project
 class WorkbenchBridge(QObject):
     statusTextChanged = Signal()
     resultChanged = Signal()
+    projectChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -79,7 +77,9 @@ class WorkbenchBridge(QObject):
         self.node_rows: list[NodeDisplacementRow] = []
         self.element_rows: list[ElementResultRow] = []
         self.summary: ResultSummary | None = None
-        self._status_text = "Ready"
+        self.project_path = ""
+        self.project_dirty = False
+        self._status_text = "就绪"
 
     @Property(str, notify=statusTextChanged)
     def statusText(self) -> str:
@@ -150,6 +150,45 @@ class WorkbenchBridge(QObject):
     def hasSolution(self) -> bool:
         return self.current_solution is not None
 
+    @Property(bool, notify=projectChanged)
+    def hasProject(self) -> bool:
+        return self.current_project is not None
+
+    @Property(str, notify=projectChanged)
+    def projectName(self) -> str:
+        return self.current_project.name if self.current_project is not None else ""
+
+    @Property(str, notify=projectChanged)
+    def projectPath(self) -> str:
+        return self.project_path
+
+    @Property(bool, notify=projectChanged)
+    def projectDirty(self) -> bool:
+        return self.project_dirty
+
+    @Slot(result=bool)
+    def newProject(self) -> bool:
+        try:
+            self.current_project = create_rectangle_plate_project(
+                width=2.0,
+                height=1.0,
+                young_modulus=210e9,
+                poisson_ratio=0.3,
+                thickness=0.01,
+                qy=-1000.0,
+                project_name="ui_rectangle_demo",
+            )
+            self.project_path = ""
+            self.project_dirty = True
+            self._clear_solution()
+            self._set_status_text("新建工程完成")
+            self.projectChanged.emit()
+            self.resultChanged.emit()
+            return True
+        except Exception as exc:
+            self._set_status_text(f"新建工程失败: {exc}")
+            return False
+
     @Slot(float, float, float, float, float, float, result=bool)
     def createDefaultProject(
         self,
@@ -161,26 +200,69 @@ class WorkbenchBridge(QObject):
         qy: float,
     ) -> bool:
         try:
-            self.current_project = self._build_default_project(
+            project_name = self.projectName or "ui_rectangle_demo"
+            self.current_project = create_rectangle_plate_project(
                 width=width,
                 height=height,
                 young_modulus=young_modulus,
                 poisson_ratio=poisson_ratio,
                 thickness=thickness,
                 qy=qy,
+                project_name=project_name,
             )
+            self.project_dirty = True
             self._clear_solution()
-            self._set_status_text("工程已创建")
+            self._set_status_text("工程已创建/更新")
+            self.projectChanged.emit()
             self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"创建工程失败: {exc}")
             return False
 
+    @Slot(str, result=bool)
+    def saveCurrentProject(
+        self,
+        file_path: str = "outputs/latest/current_project.f2dw.json",
+    ) -> bool:
+        if self.current_project is None:
+            self._set_status_text("没有可保存的工程")
+            return False
+
+        try:
+            path = save_workbench_project(self.current_project, file_path)
+            self.project_path = str(path)
+            self.project_dirty = False
+            self._set_status_text(f"工程已保存：{path}")
+            self.projectChanged.emit()
+            return True
+        except Exception as exc:
+            self._set_status_text(f"保存工程失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def loadProject(
+        self,
+        file_path: str = "outputs/latest/current_project.f2dw.json",
+    ) -> bool:
+        try:
+            path = Path(file_path)
+            self.current_project = load_workbench_project(path)
+            self.project_path = str(path)
+            self.project_dirty = False
+            self._clear_solution()
+            self._set_status_text(f"工程已打开：{path}")
+            self.projectChanged.emit()
+            self.resultChanged.emit()
+            return True
+        except Exception as exc:
+            self._set_status_text(f"打开工程失败: {exc}")
+            return False
+
     @Slot(int, int, result=bool)
     def solveCurrentProject(self, nx: int, ny: int) -> bool:
         if self.current_project is None:
-            self._set_status_text("请先创建工程")
+            self._set_status_text("请先创建工程或打开工程")
             return False
 
         try:
@@ -229,75 +311,6 @@ class WorkbenchBridge(QObject):
         except Exception as exc:
             self._set_status_text(f"导出失败: {exc}")
             return False
-
-    def _build_default_project(
-        self,
-        width: float,
-        height: float,
-        young_modulus: float,
-        poisson_ratio: float,
-        thickness: float,
-        qy: float,
-    ) -> EngineeringProject:
-        project = EngineeringProject(name="ui_rectangle_demo")
-        geometry = GeometryModel.create_rectangle(width=width, height=height)
-
-        project.add_material(
-            MaterialDefinition(
-                id="mat_steel",
-                name="steel",
-                young_modulus=young_modulus,
-                poisson_ratio=poisson_ratio,
-            )
-        )
-        project.add_section(
-            SectionDefinition(
-                id="sec_plate",
-                name="Plate section",
-                material_id="mat_steel",
-                thickness=thickness,
-                plane_mode="stress",
-            )
-        )
-        project.add_part(
-            Part(
-                id="part_rectangle",
-                name="Rectangle",
-                geometry=geometry,
-                section_id="sec_plate",
-            )
-        )
-        project.add_analysis_step(
-            AnalysisStep(
-                id="step_static",
-                name="Static linear",
-                step_type="static_linear",
-            )
-        )
-        project.add_boundary_condition(
-            BoundaryConditionDefinition(
-                id="bc_fix_left",
-                name="Fix left edge",
-                step_id="step_static",
-                target_type="geometry_edge",
-                target_id="left",
-                ux_fixed=True,
-                uy_fixed=True,
-            )
-        )
-        project.add_load(
-            LoadDefinition(
-                id="load_right_down",
-                name="Right edge downward load",
-                step_id="step_static",
-                target_type="geometry_edge",
-                target_id="right",
-                load_type="edge_uniform",
-                qy=qy,
-            )
-        )
-        project.validate_references()
-        return project
 
     def _clear_solution(self) -> None:
         self.current_solution = None

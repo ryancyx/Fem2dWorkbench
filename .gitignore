@@ -20,3 +20,15 @@ dist/
 # Pytest temporary work dirs
 pytest_tmp/
 .pytest_tmp/
+
+# Codex local runner scripts / local agent instructions
+AGENTS.md
+scripts/codex_py.ps1
+scripts/codex_pytest.ps1
+scripts/codex_run_gui.ps1
+
+# Codex / pytest local temporary directories
+.pytest_tmp/
+.pytest_tmp*/
+pytest_tmp/
+pytest_tmp*/
