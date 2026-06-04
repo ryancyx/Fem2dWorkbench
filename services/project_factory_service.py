@@ -8,6 +8,47 @@ from core.engineering.load_definition import LoadDefinition
 from core.engineering.material_definition import MaterialDefinition
 from core.engineering.part import Part
 from core.engineering.section import SectionDefinition
+from services.project_parameter_service import (
+    WorkbenchProjectParameters,
+    validate_workbench_project_parameters,
+)
+
+
+def create_empty_workbench_project(
+    project_name: str = "untitled_project",
+) -> EngineeringProject:
+    project = EngineeringProject(name=project_name)
+    project.metadata["mesh_nx"] = 4
+    project.metadata["mesh_ny"] = 2
+    project.metadata["active_part_id"] = ""
+    project.metadata["active_instance_id"] = ""
+    project.add_material(
+        MaterialDefinition(
+            id="mat_steel",
+            name="steel",
+            young_modulus=210e9,
+            poisson_ratio=0.3,
+            color="#8FB7D8",
+        )
+    )
+    project.add_section(
+        SectionDefinition(
+            id="sec_plate",
+            name="steel_plate_section",
+            material_id="mat_steel",
+            thickness=0.01,
+            plane_mode="stress",
+        )
+    )
+    project.add_analysis_step(
+        AnalysisStep(
+            id="step_static",
+            name="static_step",
+            step_type="static_linear",
+        )
+    )
+    project.validate_references()
+    return project
 
 
 def create_rectangle_plate_project(
@@ -18,15 +59,26 @@ def create_rectangle_plate_project(
     thickness: float,
     qy: float,
     project_name: str = "ui_rectangle_demo",
+    mesh_nx: int = 4,
+    mesh_ny: int = 2,
 ) -> EngineeringProject:
-    _validate_positive("width", width)
-    _validate_positive("height", height)
-    _validate_positive("young_modulus", young_modulus)
-    if not (-1.0 <= poisson_ratio <= 0.5):
-        raise ValueError("poisson_ratio must be between -1.0 and 0.5")
-    _validate_positive("thickness", thickness)
+    validate_workbench_project_parameters(
+        WorkbenchProjectParameters(
+            width=width,
+            height=height,
+            young_modulus=young_modulus,
+            poisson_ratio=poisson_ratio,
+            thickness=thickness,
+            qy=qy,
+            mesh_nx=mesh_nx,
+            mesh_ny=mesh_ny,
+        )
+    )
 
     project = EngineeringProject(name=project_name)
+    project.metadata["mesh_nx"] = mesh_nx
+    project.metadata["mesh_ny"] = mesh_ny
+    project.metadata["active_part_id"] = "part_rectangle"
     geometry = GeometryModel.create_rectangle(width=width, height=height)
 
     project.add_material(
@@ -87,8 +139,3 @@ def create_rectangle_plate_project(
     )
     project.validate_references()
     return project
-
-
-def _validate_positive(field_name: str, value: float) -> None:
-    if value <= 0.0:
-        raise ValueError(f"{field_name} must be positive")

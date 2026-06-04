@@ -11,13 +11,17 @@ def map_boundary_condition_to_constraints(
     mesh_node_to_fem_node_id: dict[int, int],
     start_constraint_id: int,
 ) -> tuple[list[Constraint], int]:
-    if boundary_condition.target_type != "geometry_edge":
-        raise ValueError("Only target_type='geometry_edge' boundary conditions are supported")
+    if boundary_condition.target_type not in {"geometry_edge", "geometry_point"}:
+        raise ValueError("Unsupported boundary condition target_type")
 
-    mesh_node_ids = mesh.geometry_edge_to_mesh_node_ids.get(boundary_condition.target_id)
+    if boundary_condition.target_type == "geometry_point":
+        mesh_node_ids = mesh.geometry_point_to_mesh_node_ids.get(boundary_condition.target_id)
+    else:
+        mesh_node_ids = mesh.geometry_edge_to_mesh_node_ids.get(boundary_condition.target_id)
+
     if mesh_node_ids is None:
         raise ValueError(
-            f"Boundary condition {boundary_condition.id!r} references unknown geometry edge "
+            f"Boundary condition {boundary_condition.id!r} references unknown geometry target "
             f"{boundary_condition.target_id!r}"
         )
     if not mesh_node_ids:

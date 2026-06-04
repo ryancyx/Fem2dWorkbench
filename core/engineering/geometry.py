@@ -56,6 +56,7 @@ class GeometryEdge:
 class GeometryFace:
     id: str
     edge_ids: list[str]
+    section_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -64,11 +65,19 @@ class GeometryFace:
             raise ValueError("GeometryFace.edge_ids must not be empty")
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "edge_ids": list(self.edge_ids)}
+        return {
+            "id": self.id,
+            "edge_ids": list(self.edge_ids),
+            "section_id": self.section_id,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GeometryFace":
-        return cls(id=str(data["id"]), edge_ids=[str(edge_id) for edge_id in data["edge_ids"]])
+        return cls(
+            id=str(data["id"]),
+            edge_ids=[str(edge_id) for edge_id in data["edge_ids"]],
+            section_id=str(data.get("section_id", "") or ""),
+        )
 
 
 @dataclass(slots=True)

@@ -81,9 +81,17 @@ def generate_rectangular_tri_mesh(
         "left": [_node_id(row, 0, nx) for row in range(ny + 1)],
     }
 
+    geometry_point_to_mesh_node_ids = {
+        "p1": [_node_id(0, 0, nx)],
+        "p2": [_node_id(0, nx, nx)],
+        "p3": [_node_id(ny, nx, nx)],
+        "p4": [_node_id(ny, 0, nx)],
+    }
+
     return MeshModel(
         nodes=nodes,
         elements=elements,
+        geometry_point_to_mesh_node_ids=geometry_point_to_mesh_node_ids,
         geometry_edge_to_mesh_node_ids=geometry_edge_to_mesh_node_ids,
         geometry_edge_to_mesh_element_edges=geometry_edge_to_mesh_element_edges,
     )

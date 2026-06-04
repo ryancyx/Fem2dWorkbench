@@ -65,3 +65,28 @@ def map_edge_uniform_load_to_nodal_loads(
         next_load_id += 1
 
     return loads, next_load_id
+
+
+def map_nodal_concentrated_load_to_nodal_loads(
+    load: LoadDefinition,
+    mesh: MeshModel,
+    mesh_node_to_fem_node_id: dict[int, int],
+    start_load_id: int,
+) -> tuple[list[Load], int]:
+    if load.target_type != "geometry_point":
+        raise ValueError("Only target_type='geometry_point' nodal loads are supported")
+    if load.load_type != "nodal_concentrated":
+        raise ValueError("Only load_type='nodal_concentrated' loads are supported")
+    if load.qx == 0.0 and load.qy == 0.0:
+        return [], start_load_id
+
+    mesh_node_ids = mesh.geometry_point_to_mesh_node_ids.get(load.target_id)
+    if mesh_node_ids is None or not mesh_node_ids:
+        raise ValueError(
+            f"Load {load.id!r} references unknown or unmapped geometry point {load.target_id!r}"
+        )
+    fem_node_id = mesh_node_to_fem_node_id.get(mesh_node_ids[0])
+    if fem_node_id is None:
+        raise ValueError(f"Mesh node {mesh_node_ids[0]!r} has no FEM node mapping")
+
+    return [Load(id=start_load_id, node_id=fem_node_id, fx=load.qx, fy=load.qy)], start_load_id + 1

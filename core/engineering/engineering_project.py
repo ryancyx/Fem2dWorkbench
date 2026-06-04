@@ -99,6 +99,7 @@ class EngineeringProject:
         part_ids = {part.id for part in self.parts}
         step_ids = {step.id for step in self.analysis_steps}
         geometry_edge_ids = {edge.id for part in self.parts for edge in part.geometry.edges}
+        geometry_point_ids = {point.id for part in self.parts for point in part.geometry.points}
 
         for section in self.sections:
             if section.material_id not in material_ids:
@@ -106,25 +107,45 @@ class EngineeringProject:
         for part in self.parts:
             if part.section_id is not None and part.section_id not in section_ids:
                 raise ValueError(f"Part {part.id!r} references unknown section {part.section_id!r}")
+            for face in part.geometry.faces:
+                if face.section_id and face.section_id not in section_ids:
+                    raise ValueError(
+                        f"GeometryFace {face.id!r} in Part {part.id!r} references unknown section {face.section_id!r}"
+                    )
         for instance in self.assembly.instances:
             if instance.part_id not in part_ids:
                 raise ValueError(f"PartInstance {instance.id!r} references unknown part {instance.part_id!r}")
         for load in self.loads:
             if load.step_id not in step_ids:
                 raise ValueError(f"Load {load.id!r} references unknown analysis step {load.step_id!r}")
-            if load.target_id not in geometry_edge_ids:
-                raise ValueError(f"Load {load.id!r} references unknown geometry edge {load.target_id!r}")
+            if load.target_type == "geometry_edge":
+                if load.target_id not in geometry_edge_ids:
+                    raise ValueError(
+                        f"Load {load.id!r} references unknown geometry edge {load.target_id!r}"
+                    )
+            elif load.target_type == "geometry_point":
+                if load.target_id not in geometry_point_ids:
+                    raise ValueError(
+                        f"Load {load.id!r} references unknown geometry point {load.target_id!r}"
+                    )
         for boundary_condition in self.boundary_conditions:
             if boundary_condition.step_id not in step_ids:
                 raise ValueError(
                     f"BoundaryCondition {boundary_condition.id!r} references unknown analysis step "
                     f"{boundary_condition.step_id!r}"
                 )
-            if boundary_condition.target_id not in geometry_edge_ids:
-                raise ValueError(
-                    f"BoundaryCondition {boundary_condition.id!r} references unknown geometry edge "
-                    f"{boundary_condition.target_id!r}"
-                )
+            if boundary_condition.target_type == "geometry_edge":
+                if boundary_condition.target_id not in geometry_edge_ids:
+                    raise ValueError(
+                        f"BoundaryCondition {boundary_condition.id!r} references unknown geometry edge "
+                        f"{boundary_condition.target_id!r}"
+                    )
+            elif boundary_condition.target_type == "geometry_point":
+                if boundary_condition.target_id not in geometry_point_ids:
+                    raise ValueError(
+                        f"BoundaryCondition {boundary_condition.id!r} references unknown geometry point "
+                        f"{boundary_condition.target_id!r}"
+                    )
 
     def to_dict(self) -> dict[str, Any]:
         return {

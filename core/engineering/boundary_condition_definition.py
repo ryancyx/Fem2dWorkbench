@@ -23,8 +23,11 @@ class BoundaryConditionDefinition:
             raise ValueError("BoundaryConditionDefinition.name must not be empty")
         if not self.step_id:
             raise ValueError("BoundaryConditionDefinition.step_id must not be empty")
-        if self.target_type != "geometry_edge":
-            raise ValueError("BoundaryConditionDefinition.target_type must be 'geometry_edge'")
+        if self.target_type not in {"geometry_edge", "geometry_point"}:
+            raise ValueError(
+                "BoundaryConditionDefinition.target_type must be "
+                "'geometry_edge' or 'geometry_point'"
+            )
         if not self.target_id:
             raise ValueError("BoundaryConditionDefinition.target_id must not be empty")
 

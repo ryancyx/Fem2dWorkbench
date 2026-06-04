@@ -22,12 +22,16 @@ class LoadDefinition:
             raise ValueError("LoadDefinition.name must not be empty")
         if not self.step_id:
             raise ValueError("LoadDefinition.step_id must not be empty")
-        if self.target_type != "geometry_edge":
-            raise ValueError("LoadDefinition.target_type must be 'geometry_edge'")
+        if self.target_type not in {"geometry_edge", "geometry_point"}:
+            raise ValueError(
+                "LoadDefinition.target_type must be 'geometry_edge' or 'geometry_point'"
+            )
         if not self.target_id:
             raise ValueError("LoadDefinition.target_id must not be empty")
-        if self.load_type != "edge_uniform":
-            raise ValueError("LoadDefinition.load_type must be 'edge_uniform'")
+        if self.load_type not in {"edge_uniform", "nodal_concentrated"}:
+            raise ValueError(
+                "LoadDefinition.load_type must be 'edge_uniform' or 'nodal_concentrated'"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -61,10 +61,12 @@ class MeshElement:
 class MeshModel:
     nodes: list[MeshNode] = field(default_factory=list)
     elements: list[MeshElement] = field(default_factory=list)
+    geometry_point_to_mesh_node_ids: dict[str, list[int]] = field(default_factory=dict)
     geometry_edge_to_mesh_node_ids: dict[str, list[int]] = field(default_factory=dict)
     geometry_edge_to_mesh_element_edges: dict[str, list[tuple[int, int, int]]] = field(
         default_factory=dict
     )
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.validate()
@@ -100,6 +102,15 @@ class MeshModel:
                         f"MeshElement {element.id!r} references unknown node {node_id!r}"
                     )
 
+        for point_id, mapped_node_ids in self.geometry_point_to_mesh_node_ids.items():
+            if not point_id:
+                raise ValueError("Geometry point ids must not be empty")
+            for node_id in mapped_node_ids:
+                if node_id not in node_id_set:
+                    raise ValueError(
+                        f"Geometry point {point_id!r} references unknown mesh node {node_id!r}"
+                    )
+
         for edge_id, mapped_node_ids in self.geometry_edge_to_mesh_node_ids.items():
             if not edge_id:
                 raise ValueError("Geometry edge ids must not be empty")
@@ -126,6 +137,10 @@ class MeshModel:
         return {
             "nodes": [node.to_dict() for node in self.nodes],
             "elements": [element.to_dict() for element in self.elements],
+            "geometry_point_to_mesh_node_ids": {
+                point_id: list(node_ids)
+                for point_id, node_ids in self.geometry_point_to_mesh_node_ids.items()
+            },
             "geometry_edge_to_mesh_node_ids": {
                 edge_id: list(node_ids)
                 for edge_id, node_ids in self.geometry_edge_to_mesh_node_ids.items()
@@ -134,6 +149,7 @@ class MeshModel:
                 edge_id: [list(item) for item in element_edges]
                 for edge_id, element_edges in self.geometry_edge_to_mesh_element_edges.items()
             },
+            "metadata": dict(self.metadata),
         }
 
     @classmethod
@@ -141,6 +157,10 @@ class MeshModel:
         return cls(
             nodes=[MeshNode.from_dict(item) for item in data.get("nodes", [])],
             elements=[MeshElement.from_dict(item) for item in data.get("elements", [])],
+            geometry_point_to_mesh_node_ids={
+                str(point_id): [int(node_id) for node_id in node_ids]
+                for point_id, node_ids in data.get("geometry_point_to_mesh_node_ids", {}).items()
+            },
             geometry_edge_to_mesh_node_ids={
                 str(edge_id): [int(node_id) for node_id in node_ids]
                 for edge_id, node_ids in data.get("geometry_edge_to_mesh_node_ids", {}).items()
@@ -154,4 +174,5 @@ class MeshModel:
                     "geometry_edge_to_mesh_element_edges", {}
                 ).items()
             },
+            metadata=dict(data.get("metadata", {})),
         )
