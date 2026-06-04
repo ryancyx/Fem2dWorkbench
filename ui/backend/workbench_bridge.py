@@ -176,6 +176,7 @@ class WorkbenchBridge(QObject):
         self.active_instance_ty = 0.0
         self.instance_count = 0
         self.instance_options: list[str] = []
+        self.assembly_instances_json = "[]"
         self.sketch_point_count = 0
         self.sketch_edge_count = 0
         self.sketch_face_count = 0
@@ -532,6 +533,10 @@ class WorkbenchBridge(QObject):
     @Property(list, notify=instancesChanged)
     def instanceOptions(self) -> list[str]:
         return list(self.instance_options)
+
+    @Property(str, notify=instancesChanged)
+    def assemblyInstancesJson(self) -> str:
+        return self.assembly_instances_json
 
     @Property(int, notify=sketchChanged)
     def sketchPointCount(self) -> int:
@@ -2242,6 +2247,7 @@ class WorkbenchBridge(QObject):
             self.active_instance_ty = 0.0
             self.instance_count = 0
             self.instance_options = []
+            self.assembly_instances_json = "[]"
             self.instancesChanged.emit()
             return
 
@@ -2253,6 +2259,7 @@ class WorkbenchBridge(QObject):
             self.active_instance_ty = 0.0
             self.instance_count = 0
             self.instance_options = []
+            self.assembly_instances_json = "[]"
             self.instancesChanged.emit()
             return
 
@@ -2268,7 +2275,43 @@ class WorkbenchBridge(QObject):
             f"{row['id']} | {row['name']} | {row['part_id']} | tx={row['tx']:.3f} | ty={row['ty']:.3f}"
             for row in instance_rows
         ]
+        self.assembly_instances_json = json.dumps(
+            self._build_assembly_instance_rows(instance_rows),
+            ensure_ascii=False,
+        )
         self.instancesChanged.emit()
+
+    def _build_assembly_instance_rows(self, instance_rows: list[dict]) -> list[dict]:
+        if self.current_project is None:
+            return []
+
+        rows: list[dict] = []
+        for instance_row in instance_rows:
+            part_id = str(instance_row.get("part_id", "") or "")
+            part = self.current_project.get_part_by_id(part_id)
+            if part is None:
+                print(
+                    f"Warning: assembly instance references missing part {part_id!r}",
+                    file=sys.stderr,
+                )
+                continue
+            rows.append(
+                {
+                    "id": str(instance_row.get("id", "") or ""),
+                    "name": str(instance_row.get("name", "") or ""),
+                    "part_id": part_id,
+                    "part_name": str(instance_row.get("part_name", "") or part.name),
+                    "tx": float(instance_row.get("tx", 0.0) or 0.0),
+                    "ty": float(instance_row.get("ty", 0.0) or 0.0),
+                    "rotation": float(instance_row.get("rotation", 0.0) or 0.0),
+                    "is_active": bool(instance_row.get("is_active", False)),
+                    "points": [point.to_dict() for point in part.geometry.points],
+                    "edges": [edge.to_dict() for edge in part.geometry.edges],
+                    "faces": [face.to_dict() for face in part.geometry.faces],
+                    "face_materials": get_part_face_material_rows(self.current_project, part_id),
+                }
+            )
+        return rows
 
     def _sync_parameter_cache_from_project(self) -> None:
         if self.current_project is None:

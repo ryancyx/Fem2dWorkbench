@@ -320,6 +320,14 @@ ApplicationWindow {
         }
     }
 
+    function assemblyInstances() {
+        try {
+            return JSON.parse(bridge.assemblyInstancesJson)
+        } catch (e) {
+            return []
+        }
+    }
+
     function sketchPointMap() {
         var map = {}
         var points = sketchPoints()
@@ -670,8 +678,6 @@ ApplicationWindow {
 
         var px = (viewport.width - plateW) / 2 + root.viewportOffsetX
         var py = (viewport.height - plateH) / 2 + root.viewportOffsetY
-        px += bridge.activeInstanceTx * 80 * root.viewportScale
-        py -= bridge.activeInstanceTy * 80 * root.viewportScale
 
         root.lastPlateX = px
         root.lastPlateY = py
@@ -689,12 +695,169 @@ ApplicationWindow {
             root.drawEmptyProjectHint(ctx, "暂无装配实例，请选择零件并创建实例")
             return
         }
+        if (root.currentMode === "装配") {
+            root.drawAssemblyGeometry(ctx)
+            return
+        }
         if (!bridge.sketchHasFace && bridge.sketchPointCount > 0) {
             root.drawEmptyProjectHint(ctx, "当前零件尚未生成闭合面")
         }
         if (bridge.sketchPointCount > 0) {
             root.drawSketchGeometry(ctx)
         }
+    }
+
+    function assemblyInstanceScreenPointMap(instanceRow) {
+        var map = {}
+        var points = instanceRow.points || []
+        var offsetX = Number(instanceRow.tx || 0) * root.sketchDrawScale
+        var offsetY = Number(instanceRow.ty || 0) * root.sketchDrawScale
+        for (var i = 0; i < points.length; i++) {
+            map[points[i].id] = {
+                x: root.sketchOriginX + points[i].x * root.sketchDrawScale + offsetX,
+                y: root.sketchOriginY + root.sketchDrawHeight - points[i].y * root.sketchDrawScale - offsetY
+            }
+        }
+        return map
+    }
+
+    function assemblyFaceMaterialColor(instanceRow, faceId) {
+        var rows = instanceRow.face_materials || []
+        for (var i = 0; i < rows.length; i++) {
+            if (String(rows[i].face_id) === String(faceId) && rows[i].material_color) {
+                return rows[i].material_color
+            }
+        }
+        return "#8FB7D8"
+    }
+
+    function orderedFacePolygonFromRows(faceRow, pointMap, edgeRows) {
+        if (!faceRow || !faceRow.edge_ids || faceRow.edge_ids.length < 3) {
+            return []
+        }
+        var edgeMap = {}
+        var adjacency = {}
+        for (var i = 0; i < edgeRows.length; i++) {
+            var edge = edgeRows[i]
+            edgeMap[edge.id] = edge
+        }
+        for (var j = 0; j < faceRow.edge_ids.length; j++) {
+            var faceEdge = edgeMap[faceRow.edge_ids[j]]
+            if (!faceEdge) {
+                continue
+            }
+            if (!adjacency[faceEdge.start_point_id]) {
+                adjacency[faceEdge.start_point_id] = []
+            }
+            if (!adjacency[faceEdge.end_point_id]) {
+                adjacency[faceEdge.end_point_id] = []
+            }
+            adjacency[faceEdge.start_point_id].push(faceEdge.end_point_id)
+            adjacency[faceEdge.end_point_id].push(faceEdge.start_point_id)
+        }
+
+        var orderedIds = []
+        var startEdge = edgeMap[faceRow.edge_ids[0]]
+        if (!startEdge) {
+            return []
+        }
+        var startId = startEdge.start_point_id
+        var currentId = startId
+        var previousId = ""
+        var guard = 0
+        while (guard < faceRow.edge_ids.length + 2) {
+            orderedIds.push(currentId)
+            var neighbors = adjacency[currentId] || []
+            var nextId = ""
+            for (var k = 0; k < neighbors.length; k++) {
+                if (neighbors[k] !== previousId) {
+                    nextId = neighbors[k]
+                    break
+                }
+            }
+            if (nextId === "" || nextId === startId) {
+                break
+            }
+            previousId = currentId
+            currentId = nextId
+            guard += 1
+        }
+
+        var polygon = []
+        for (var m = 0; m < orderedIds.length; m++) {
+            if (pointMap[orderedIds[m]]) {
+                polygon.push(pointMap[orderedIds[m]])
+            }
+        }
+        return polygon
+    }
+
+    function drawAssemblyGeometry(ctx) {
+        var rows = root.assemblyInstances()
+        for (var i = 0; i < rows.length; i++) {
+            root.drawAssemblyInstance(ctx, rows[i])
+        }
+    }
+
+    function drawAssemblyInstance(ctx, instanceRow) {
+        var pointMap = root.assemblyInstanceScreenPointMap(instanceRow)
+        var points = instanceRow.points || []
+        var edges = instanceRow.edges || []
+        var faces = instanceRow.faces || []
+        var strokeColor = instanceRow.is_active ? "#2563EB" : "#64748B"
+        var lineWidth = instanceRow.is_active ? 2.6 : 1.8
+
+        for (var fi = 0; fi < faces.length; fi++) {
+            var polygon = root.orderedFacePolygonFromRows(faces[fi], pointMap, edges)
+            if (polygon.length < 3) {
+                continue
+            }
+            ctx.save()
+            ctx.beginPath()
+            for (var fp = 0; fp < polygon.length; fp++) {
+                if (fp === 0) {
+                    ctx.moveTo(polygon[fp].x, polygon[fp].y)
+                } else {
+                    ctx.lineTo(polygon[fp].x, polygon[fp].y)
+                }
+            }
+            ctx.closePath()
+            ctx.fillStyle = root.materialFillColor(
+                root.assemblyFaceMaterialColor(instanceRow, faces[fi].id),
+                instanceRow.is_active ? 0.28 : 0.16
+            )
+            ctx.fill()
+            ctx.restore()
+        }
+
+        ctx.save()
+        for (var ei = 0; ei < edges.length; ei++) {
+            var startPoint = pointMap[edges[ei].start_point_id]
+            var endPoint = pointMap[edges[ei].end_point_id]
+            if (!startPoint || !endPoint) {
+                continue
+            }
+            ctx.strokeStyle = strokeColor
+            ctx.lineWidth = lineWidth
+            ctx.beginPath()
+            ctx.moveTo(startPoint.x, startPoint.y)
+            ctx.lineTo(endPoint.x, endPoint.y)
+            ctx.stroke()
+        }
+        for (var pi = 0; pi < points.length; pi++) {
+            var screenPoint = pointMap[points[pi].id]
+            if (!screenPoint) {
+                continue
+            }
+            ctx.beginPath()
+            ctx.arc(screenPoint.x, screenPoint.y, instanceRow.is_active ? 4.5 : 3.5, 0, Math.PI * 2)
+            ctx.fillStyle = "#FFFFFF"
+            ctx.fill()
+            ctx.strokeStyle = strokeColor
+            ctx.lineWidth = 1.8
+            ctx.stroke()
+        }
+        ctx.restore()
     }
 
     function drawSketchGeometry(ctx) {
@@ -1620,11 +1783,38 @@ ApplicationWindow {
     }
 
     function handleAssemblyViewportClick(mouseX, mouseY) {
-        var inPlate = mouseX >= lastPlateX && mouseX <= lastPlateX + lastPlateW
-                && mouseY >= lastPlateY && mouseY <= lastPlateY + lastPlateH
-        if (inPlate) {
+        var instances = root.assemblyInstances()
+        for (var i = instances.length - 1; i >= 0; i--) {
+            var pointMap = root.assemblyInstanceScreenPointMap(instances[i])
+            var points = instances[i].points || []
+            if (points.length === 0) {
+                continue
+            }
+            var minX = 1.0e9
+            var minY = 1.0e9
+            var maxX = -1.0e9
+            var maxY = -1.0e9
+            for (var j = 0; j < points.length; j++) {
+                var screenPoint = pointMap[points[j].id]
+                if (!screenPoint) {
+                    continue
+                }
+                minX = Math.min(minX, screenPoint.x)
+                minY = Math.min(minY, screenPoint.y)
+                maxX = Math.max(maxX, screenPoint.x)
+                maxY = Math.max(maxY, screenPoint.y)
+            }
+            if (mouseX >= minX - 8 && mouseX <= maxX + 8 && mouseY >= minY - 8 && mouseY <= maxY + 8) {
+                bridge.setActiveInstance(instances[i].id)
+                root.selectAssemblyInstance()
+                root.setViewportHint("已选中装配实例：" + instances[i].name)
+                root.repaintViewport()
+                return
+            }
+        }
+        if (bridge.instanceCount > 0) {
             root.selectAssemblyInstance()
-            root.setViewportHint("已选中当前装配实例。")
+            root.setViewportHint("未命中装配实例，当前保持活动实例高亮。")
         } else {
             root.clearViewportSelection()
             root.clearBridgeSelectionIfNeeded()
@@ -2695,6 +2885,16 @@ ApplicationWindow {
                                                 Layout.fillWidth: true
                                                 model: bridge.partOptions
                                                 currentIndex: root.partOptionIndex()
+                                                onActivated: function(index) {
+                                                    var partId = root.parsePartIdFromOption(materialTargetPartCombo.textAt(index))
+                                                    if (partId !== "") {
+                                                        bridge.setActivePart(partId)
+                                                        root.selectedSketchFaceId = ""
+                                                        root.clearViewportSelection()
+                                                        root.clearBridgeSelectionIfNeeded()
+                                                        root.repaintViewport()
+                                                    }
+                                                }
                                             }
                                             Label { text: "闭合面材料"; color: "#64748B"; font.pixelSize: 12 }
                                             TextArea {
@@ -3168,6 +3368,7 @@ ApplicationWindow {
                                                 onActivated: function(index) {
                                                     var instanceId = root.parseInstanceIdFromOption(activeInstanceCombo.textAt(index))
                                                     bridge.setActiveInstance(instanceId)
+                                                    root.repaintViewport()
                                                 }
                                             }
 
@@ -3210,12 +3411,15 @@ ApplicationWindow {
                                             SecondaryButton {
                                                 text: "创建实例"
                                                 buttonWidth: 96
-                                                onClicked: bridge.addInstanceForPart(
-                                                    root.parsePartIdFromOption(instancePartCombo.currentText),
-                                                    instanceNameField.text,
-                                                    Number(instanceTxField.text),
-                                                    Number(instanceTyField.text)
-                                                )
+                                                onClicked: {
+                                                    bridge.addInstanceForPart(
+                                                        root.parsePartIdFromOption(instancePartCombo.currentText),
+                                                        instanceNameField.text,
+                                                        Number(instanceTxField.text),
+                                                        Number(instanceTyField.text)
+                                                    )
+                                                    root.repaintViewport()
+                                                }
                                             }
 
                                             CheckBox {
@@ -3248,7 +3452,10 @@ ApplicationWindow {
                                             SecondaryButton {
                                                 text: "移动实例"
                                                 buttonWidth: 96
-                                                onClicked: bridge.moveActiveInstance(Number(moveTxField.text), Number(moveTyField.text))
+                                                onClicked: {
+                                                    bridge.moveActiveInstance(Number(moveTxField.text), Number(moveTyField.text))
+                                                    root.repaintViewport()
+                                                }
                                             }
 
                                             Label { text: "参考点移动"; color: "#64748B"; font.pixelSize: 12 }
@@ -3267,12 +3474,15 @@ ApplicationWindow {
                                             SecondaryButton {
                                                 text: "移动参考点到坐标"
                                                 buttonWidth: 152
-                                                onClicked: bridge.moveActiveInstanceReferencePointTo(
-                                                    Number(referenceLocalXField.text),
-                                                    Number(referenceLocalYField.text),
-                                                    Number(referenceTargetXField.text),
-                                                    Number(referenceTargetYField.text)
-                                                )
+                                                onClicked: {
+                                                    bridge.moveActiveInstanceReferencePointTo(
+                                                        Number(referenceLocalXField.text),
+                                                        Number(referenceLocalYField.text),
+                                                        Number(referenceTargetXField.text),
+                                                        Number(referenceTargetYField.text)
+                                                    )
+                                                    root.repaintViewport()
+                                                }
                                             }
 
                                             TextField {
@@ -3296,7 +3506,10 @@ ApplicationWindow {
                                                 SecondaryButton {
                                                     text: "删除活动实例"
                                                     buttonWidth: 116
-                                                    onClicked: bridge.deleteActiveInstance()
+                                                    onClicked: {
+                                                        bridge.deleteActiveInstance()
+                                                        root.repaintViewport()
+                                                    }
                                                 }
                                             }
                                         }
