@@ -14,6 +14,8 @@ class LoadDefinition:
     load_type: str
     qx: float = 0.0
     qy: float = 0.0
+    start_t: float = 0.0
+    end_t: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -22,9 +24,10 @@ class LoadDefinition:
             raise ValueError("LoadDefinition.name must not be empty")
         if not self.step_id:
             raise ValueError("LoadDefinition.step_id must not be empty")
-        if self.target_type not in {"geometry_edge", "geometry_point"}:
+        if self.target_type not in {"geometry_edge", "geometry_edge_segment", "geometry_point"}:
             raise ValueError(
-                "LoadDefinition.target_type must be 'geometry_edge' or 'geometry_point'"
+                "LoadDefinition.target_type must be 'geometry_edge', "
+                "'geometry_edge_segment', or 'geometry_point'"
             )
         if not self.target_id:
             raise ValueError("LoadDefinition.target_id must not be empty")
@@ -32,6 +35,18 @@ class LoadDefinition:
             raise ValueError(
                 "LoadDefinition.load_type must be 'edge_uniform' or 'nodal_concentrated'"
             )
+        if self.load_type == "nodal_concentrated":
+            self.start_t = 0.0
+            self.end_t = 1.0
+        else:
+            start_t = float(self.start_t)
+            end_t = float(self.end_t)
+            self.start_t = min(start_t, end_t)
+            self.end_t = max(start_t, end_t)
+            if self.start_t < 0.0 or self.end_t > 1.0:
+                raise ValueError("LoadDefinition edge segment range must stay within [0, 1]")
+            if self.end_t - self.start_t <= 1.0e-9:
+                raise ValueError("LoadDefinition edge segment range is too short")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +58,8 @@ class LoadDefinition:
             "load_type": self.load_type,
             "qx": self.qx,
             "qy": self.qy,
+            "start_t": self.start_t,
+            "end_t": self.end_t,
         }
 
     @classmethod
@@ -56,4 +73,6 @@ class LoadDefinition:
             load_type=str(data["load_type"]),
             qx=float(data.get("qx", 0.0)),
             qy=float(data.get("qy", 0.0)),
+            start_t=float(data.get("start_t", 0.0)),
+            end_t=float(data.get("end_t", 1.0)),
         )

@@ -65,10 +65,13 @@ from services.assembly_edit_service import (
 )
 from services.compile_service import compile_workbench_project
 from services.export_service import (
+    export_deformation_plot_data_json,
     export_element_results_csv,
     export_node_displacements_csv,
     export_result_summary_txt,
+    export_von_mises_contour_data_json,
 )
+from services.face_material_service import assign_material_to_face, get_part_face_material_rows
 from services.material_manager_service import (
     add_material,
     assign_material_to_part,
@@ -98,15 +101,19 @@ from services.result_service import (
     ElementResultRow,
     NodeDisplacementRow,
     ResultSummary,
+    build_deformation_plot_data,
     build_element_result_rows,
     build_node_displacement_rows,
     build_result_summary,
+    build_stress_contour_data,
 )
+from services.result_query_service import format_result_query_text, query_result_at_point
 from services.solve_service import WorkbenchSolveResult, solve_workbench_project
 from services.sketch_geometry_service import (
     add_sketch_edge,
     add_sketch_point,
     build_single_face_from_edges,
+    build_faces_from_edges,
     can_build_single_closed_face,
     clear_sketch_geometry,
     create_empty_sketch_geometry,
@@ -216,6 +223,8 @@ class WorkbenchBridge(QObject):
         self.result_query_text = ""
         self.node_rows_json = "[]"
         self.element_rows_json = "[]"
+        self.deformation_plot_json = "{}"
+        self.stress_contour_json = "{}"
         self.selected_geometry_type = ""
         self.selected_geometry_id = ""
 
@@ -443,6 +452,14 @@ class WorkbenchBridge(QObject):
     @Property(str, notify=resultChanged)
     def elementRowsJson(self) -> str:
         return self.element_rows_json
+
+    @Property(str, notify=resultChanged)
+    def deformationPlotJson(self) -> str:
+        return self.deformation_plot_json
+
+    @Property(str, notify=resultChanged)
+    def stressContourJson(self) -> str:
+        return self.stress_contour_json
 
     @Property(bool, notify=projectChanged)
     def hasProject(self) -> bool:
@@ -1352,7 +1369,32 @@ class WorkbenchBridge(QObject):
 
     @Slot(str, float, result=bool)
     def assignMaterialToSelectedFace(self, material_id: str, thickness: float) -> bool:
-        return self.assignMaterialToActivePart(material_id, thickness)
+        if self.current_project is None:
+            self._set_status_text("请先新建或打开工程")
+            return False
+        if not self.active_part_id:
+            self._set_status_text("没有活动模型")
+            return False
+        if not self.selected_sketch_face_id:
+            self._set_status_text("请先选择闭合面")
+            return False
+        try:
+            assign_material_to_face(
+                self.current_project,
+                self.active_part_id,
+                self.selected_sketch_face_id,
+                material_id,
+                thickness,
+            )
+            self.project_dirty = True
+            self._sync_material_state_from_project()
+            self._sync_parameter_cache_from_project()
+            self._set_status_text(f"已应用材料到闭合面 {self.selected_sketch_face_id}")
+            self.projectChanged.emit()
+            return True
+        except Exception as exc:
+            self._set_status_text(f"应用闭合面材料失败: {exc}")
+            return False
 
     @Slot(str, float, result=bool)
     def assignMaterialToAllFaces(self, material_id: str, thickness: float) -> bool:
@@ -1790,11 +1832,12 @@ class WorkbenchBridge(QObject):
     def buildSketchFace(self) -> bool:
         try:
             part = self._require_active_part()
-            build_single_face_from_edges(part.geometry)
+            build_faces_from_edges(part.geometry)
             self.project_dirty = True
             self._clear_solution()
             self._clear_sketch_mesh(emit_signal=True)
             self._sync_sketch_from_active_part()
+            self._sync_material_state_from_project()
             self._set_status_text("已生成闭合二维面")
             self.projectChanged.emit()
             self.resultChanged.emit()
@@ -2499,4 +2542,3 @@ class WorkbenchBridge(QObject):
             return
         self._status_text = text
         self.statusTextChanged.emit()
-

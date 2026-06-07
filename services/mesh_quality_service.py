@@ -100,13 +100,14 @@ def build_mesh_quality_summary(mesh: MeshModel) -> MeshQualitySummary:
 
 
 def calculate_polygon_area_from_geometry(geometry: GeometryModel) -> float:
-    points = _ordered_loop_points(geometry)
-    if len(points) < 3:
-        raise ValueError("Geometry polygon must contain at least 3 points")
+    loops = _ordered_loop_points(geometry)
     area = 0.0
-    for index, point in enumerate(points):
-        next_point = points[(index + 1) % len(points)]
-        area += point[0] * next_point[1] - next_point[0] * point[1]
+    for points in loops:
+        if len(points) < 3:
+            raise ValueError("Geometry polygon must contain at least 3 points")
+        for index, point in enumerate(points):
+            next_point = points[(index + 1) % len(points)]
+            area += point[0] * next_point[1] - next_point[0] * point[1]
     return abs(area) * 0.5
 
 
@@ -175,45 +176,43 @@ def validate_mesh_covers_geometry(
     )
 
 
-def _ordered_loop_points(geometry: GeometryModel) -> list[tuple[float, float]]:
-    if geometry.faces:
-        if len(geometry.faces) != 1:
-            raise ValueError("Geometry must contain exactly one face")
-        edge_ids = geometry.faces[0].edge_ids
-        edge_by_id = {edge.id: edge for edge in geometry.edges}
-        edges = [edge_by_id[edge_id] for edge_id in edge_ids]
-    else:
-        edges = list(geometry.edges)
+def _ordered_loop_points(geometry: GeometryModel) -> list[list[tuple[float, float]]]:
+    face_rows = geometry.faces or []
     point_by_id = {point.id: point for point in geometry.points}
-    adjacency: dict[str, list[str]] = {}
-    for edge in edges:
-        if edge.start_point_id not in point_by_id or edge.end_point_id not in point_by_id:
-            raise ValueError("Geometry edge references unknown points")
-        adjacency.setdefault(edge.start_point_id, []).append(edge.end_point_id)
-        adjacency.setdefault(edge.end_point_id, []).append(edge.start_point_id)
-    if not adjacency:
+    edge_by_id = {edge.id: edge for edge in geometry.edges}
+    if not face_rows:
         raise ValueError("Geometry contains no closed loop")
-    if any(len(neighbors) != 2 for neighbors in adjacency.values()):
-        raise ValueError("Geometry edges do not form a single closed loop")
-
-    start_id = min(adjacency, key=lambda point_id: (point_by_id[point_id].x, point_by_id[point_id].y, point_id))
-    current_id = adjacency[start_id][0]
-    previous_id = start_id
-    ordered_ids = [start_id]
-
-    while current_id != start_id:
-        ordered_ids.append(current_id)
-        next_candidates = [item for item in adjacency[current_id] if item != previous_id]
-        if len(next_candidates) != 1:
-            raise ValueError("Geometry edges do not form a single closed loop")
-        previous_id, current_id = current_id, next_candidates[0]
-        if len(ordered_ids) > len(adjacency) + 1:
+    loop_points: list[list[tuple[float, float]]] = []
+    for face in face_rows:
+        edges = [edge_by_id[edge_id] for edge_id in face.edge_ids]
+        adjacency: dict[str, list[str]] = {}
+        for edge in edges:
+            if edge.start_point_id not in point_by_id or edge.end_point_id not in point_by_id:
+                raise ValueError("Geometry edge references unknown points")
+            adjacency.setdefault(edge.start_point_id, []).append(edge.end_point_id)
+            adjacency.setdefault(edge.end_point_id, []).append(edge.start_point_id)
+        if any(len(neighbors) != 2 for neighbors in adjacency.values()):
             raise ValueError("Geometry edges do not form a single closed loop")
 
-    ordered_points = [(point_by_id[point_id].x, point_by_id[point_id].y) for point_id in ordered_ids]
-    if _signed_area_xy(ordered_points) < 0.0:
-        ordered_points.reverse()
-    return ordered_points
+        start_id = min(adjacency, key=lambda point_id: (point_by_id[point_id].x, point_by_id[point_id].y, point_id))
+        current_id = adjacency[start_id][0]
+        previous_id = start_id
+        ordered_ids = [start_id]
+
+        while current_id != start_id:
+            ordered_ids.append(current_id)
+            next_candidates = [item for item in adjacency[current_id] if item != previous_id]
+            if len(next_candidates) != 1:
+                raise ValueError("Geometry edges do not form a single closed loop")
+            previous_id, current_id = current_id, next_candidates[0]
+            if len(ordered_ids) > len(adjacency) + 1:
+                raise ValueError("Geometry edges do not form a single closed loop")
+
+        ordered_points = [(point_by_id[point_id].x, point_by_id[point_id].y) for point_id in ordered_ids]
+        if _signed_area_xy(ordered_points) < 0.0:
+            ordered_points.reverse()
+        loop_points.append(ordered_points)
+    return loop_points
 
 
 def _signed_area_xy(points: list[tuple[float, float]]) -> float:

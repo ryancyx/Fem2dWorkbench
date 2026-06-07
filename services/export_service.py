@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from services.result_service import (
+    build_deformation_plot_data,
     build_element_result_rows,
     build_node_displacement_rows,
     build_result_summary,
+    build_stress_contour_data,
 )
 from services.solve_service import WorkbenchSolveResult
 
@@ -71,3 +74,27 @@ def export_result_summary_txt(
         f"warning_count: {summary.warning_count}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def export_deformation_plot_data_json(
+    solution: WorkbenchSolveResult,
+    file_path: str | Path,
+) -> None:
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(build_deformation_plot_data(solution), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def export_von_mises_contour_data_json(
+    solution: WorkbenchSolveResult,
+    file_path: str | Path,
+) -> None:
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(build_stress_contour_data(solution), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )

@@ -41,6 +41,13 @@ def generate_quality_sketch_tri_mesh(
 
 
 def _reconstruct_boundary_loop_from_edges(geometry: GeometryModel) -> BoundaryLoop:
+    loops = _reconstruct_boundary_loops_from_geometry(geometry)
+    if len(loops) != 1:
+        raise ValueError("Quality sketch mesher requires exactly one face")
+    return loops[0]
+
+
+def _reconstruct_boundary_loops_from_geometry(geometry: GeometryModel) -> list[BoundaryLoop]:
     if len(geometry.points) < 3:
         raise ValueError("Geometry must contain at least 3 points")
     if len(geometry.edges) < 3:
@@ -48,20 +55,25 @@ def _reconstruct_boundary_loop_from_edges(geometry: GeometryModel) -> BoundaryLo
 
     point_by_id = {point.id: point for point in geometry.points}
     edge_by_id = {edge.id: edge for edge in geometry.edges}
-
-    if geometry.faces:
-        if len(geometry.faces) != 1:
-            raise ValueError("Quality sketch mesher requires exactly one face")
-        face = geometry.faces[0]
+    face_rows = geometry.faces or [
+        type("_FaceRow", (), {"id": f"f{index}", "edge_ids": list(component_edge_ids)})
+        for index, component_edge_ids in enumerate(_edge_components(geometry), start=1)
+    ]
+    loops: list[BoundaryLoop] = []
+    for face in face_rows:
         try:
             candidate_edges = [edge_by_id[edge_id] for edge_id in face.edge_ids]
         except KeyError as exc:
             raise ValueError(f"Geometry face references unknown edge {exc.args[0]!r}") from exc
-        face_id = face.id
-    else:
-        candidate_edges = list(geometry.edges)
-        face_id = "face"
+        loops.append(_reconstruct_single_boundary_loop(point_by_id, candidate_edges, face.id))
+    return loops
 
+
+def _reconstruct_single_boundary_loop(
+    point_by_id: dict[str, object],
+    candidate_edges: list[object],
+    face_id: str,
+) -> BoundaryLoop:
     adjacency: dict[str, list[tuple[str, str]]] = {}
     edge_id_by_endpoint_pair: dict[frozenset[str], str] = {}
     participating_point_ids: set[str] = set()
@@ -143,6 +155,35 @@ def _reconstruct_boundary_loop_from_edges(geometry: GeometryModel) -> BoundaryLo
         ordered_points=ordered_points,
         face_id=face_id,
     )
+
+
+def _edge_components(geometry: GeometryModel) -> list[list[str]]:
+    point_neighbors: dict[str, set[str]] = {}
+    for edge in geometry.edges:
+        point_neighbors.setdefault(edge.start_point_id, set()).add(edge.end_point_id)
+        point_neighbors.setdefault(edge.end_point_id, set()).add(edge.start_point_id)
+    remaining = set(point_neighbors)
+    components: list[list[str]] = []
+    edge_ids_by_component: list[list[str]] = []
+    while remaining:
+        start = next(iter(remaining))
+        stack = [start]
+        component_points: set[str] = set()
+        while stack:
+            point_id = stack.pop()
+            if point_id in component_points:
+                continue
+            component_points.add(point_id)
+            stack.extend(point_neighbors.get(point_id, set()) - component_points)
+        remaining -= component_points
+        edge_ids_by_component.append(
+            [
+                edge.id
+                for edge in geometry.edges
+                if edge.start_point_id in component_points and edge.end_point_id in component_points
+            ]
+        )
+    return edge_ids_by_component
 
 
 def _edge_ids_for_ordered_points(

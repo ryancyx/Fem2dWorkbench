@@ -31,6 +31,7 @@ class NodeDisplacementRow:
 class ElementResultRow:
     element_id: int
     node_ids: list[int]
+    source_face_id: str | None
     strain_x: float
     strain_y: float
     strain_xy: float
@@ -43,6 +44,7 @@ class ElementResultRow:
         return {
             "element_id": self.element_id,
             "node_ids": list(self.node_ids),
+            "source_face_id": self.source_face_id,
             "strain_x": self.strain_x,
             "strain_y": self.strain_y,
             "strain_xy": self.strain_xy,
@@ -127,6 +129,7 @@ def build_element_result_rows(
             ElementResultRow(
                 element_id=element.id,
                 node_ids=list(element.node_ids),
+                source_face_id=element.source_face_id,
                 strain_x=strain_x,
                 strain_y=strain_y,
                 strain_xy=strain_xy,
@@ -167,3 +170,24 @@ def build_result_summary(solution: WorkbenchSolveResult) -> ResultSummary:
 def _plane_stress_von_mises(stress_x: float, stress_y: float, stress_xy: float) -> float:
     value = stress_x**2 - stress_x * stress_y + stress_y**2 + 3.0 * stress_xy**2
     return math.sqrt(max(value, 0.0))
+
+
+def build_deformation_plot_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
+    return {
+        "nodes": [row.to_dict() for row in build_node_displacement_rows(solution)],
+        "elements": [
+            {
+                "element_id": element.id,
+                "node_ids": list(element.node_ids),
+                "source_face_id": element.source_face_id,
+            }
+            for element in solution.mesh.elements
+        ],
+    }
+
+
+def build_stress_contour_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
+    return {
+        "nodes": [node.to_dict() for node in solution.mesh.nodes],
+        "elements": [row.to_dict() for row in build_element_result_rows(solution)],
+    }

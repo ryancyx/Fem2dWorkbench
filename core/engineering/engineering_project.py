@@ -118,7 +118,7 @@ class EngineeringProject:
         for load in self.loads:
             if load.step_id not in step_ids:
                 raise ValueError(f"Load {load.id!r} references unknown analysis step {load.step_id!r}")
-            if load.target_type == "geometry_edge":
+            if load.target_type in {"geometry_edge", "geometry_edge_segment"}:
                 if load.target_id not in geometry_edge_ids:
                     raise ValueError(
                         f"Load {load.id!r} references unknown geometry edge {load.target_id!r}"

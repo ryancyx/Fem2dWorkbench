@@ -12,7 +12,7 @@ from core.engineering.geometry import GeometryModel
 from core.engineering.mesh_model import MeshElement, MeshModel, MeshNode
 from core.meshing.quality_sketch_mesher import (
     BoundaryLoop,
-    _reconstruct_boundary_loop_from_edges,
+    _reconstruct_boundary_loops_from_geometry,
 )
 from services.mesh_quality_service import (
     build_mesh_quality_summary,
@@ -43,8 +43,8 @@ def generate_gmsh_cst_mesh(
     if min_angle <= 0.0 or min_angle >= 180.0:
         raise ValueError("min_angle must be between 0 and 180")
 
-    loop = _reconstruct_boundary_loop_from_edges(geometry)
-    polygon_area = abs(_signed_area(loop.ordered_points))
+    loops = _reconstruct_boundary_loops_from_geometry(geometry)
+    polygon_area = sum(abs(_signed_area(loop.ordered_points)) for loop in loops)
     if polygon_area <= _EPS:
         raise ValueError("Geometry loop area must be positive")
 
@@ -53,7 +53,7 @@ def generate_gmsh_cst_mesh(
         gmsh.option.setNumber("General.Terminal", 0)
         mesh_data = _generate_with_gmsh_model(
             geometry=geometry,
-            loop=loop,
+            loops=loops,
             target_size=target_size,
         )
     except Exception as exc:
@@ -65,21 +65,21 @@ def generate_gmsh_cst_mesh(
 
     mesh = _build_mesh_model(
         geometry=geometry,
-        loop=loop,
+        loops=loops,
         target_size=target_size,
         max_area=max_area,
         min_angle=min_angle,
         polygon_area=polygon_area,
         node_coordinates=mesh_data["node_coordinates"],
-        triangle_node_ids=mesh_data["triangle_node_ids"],
+        triangle_rows=mesh_data["triangle_rows"],
     )
-    _validate_gmsh_mesh_integrity(geometry, loop, mesh)
+    _validate_gmsh_mesh_integrity(geometry, loops, mesh)
     return mesh
 
 
 def _generate_with_gmsh_model(
     geometry: GeometryModel,
-    loop: BoundaryLoop,
+    loops: list[BoundaryLoop],
     target_size: float,
 ) -> dict[str, object]:
     gmsh.model.add("fem2dworkbench_part")
@@ -89,26 +89,39 @@ def _generate_with_gmsh_model(
     gmsh.option.setNumber("Mesh.RecombineAll", 0)
 
     point_tags: dict[str, int] = {}
-    for point_id, (x, y) in zip(loop.ordered_point_ids, loop.ordered_points):
-        point_tags[point_id] = gmsh.model.geo.addPoint(
-            float(x),
-            float(y),
+    for point in geometry.points:
+        point_tags[point.id] = gmsh.model.geo.addPoint(
+            float(point.x),
+            float(point.y),
             0.0,
             float(target_size),
         )
 
-    ordered_line_tags: list[int] = []
-    for index, edge_id in enumerate(loop.ordered_edge_ids):
-        start_point_id = loop.ordered_point_ids[index]
-        end_point_id = loop.ordered_point_ids[(index + 1) % len(loop.ordered_point_ids)]
-        line_tag = gmsh.model.geo.addLine(
-            point_tags[start_point_id],
-            point_tags[end_point_id],
+    edge_by_id = {edge.id: edge for edge in geometry.edges}
+    line_tags_by_edge_id: dict[str, int] = {}
+    for edge in geometry.edges:
+        line_tags_by_edge_id[edge.id] = gmsh.model.geo.addLine(
+            point_tags[edge.start_point_id],
+            point_tags[edge.end_point_id],
         )
-        ordered_line_tags.append(line_tag)
 
-    curve_loop_tag = gmsh.model.geo.addCurveLoop(ordered_line_tags)
-    surface_tag = gmsh.model.geo.addPlaneSurface([curve_loop_tag])
+    surface_tags_by_face_id: dict[str, int] = {}
+    for loop in loops:
+        ordered_line_tags: list[int] = []
+        for index, edge_id in enumerate(loop.ordered_edge_ids):
+            edge = edge_by_id[edge_id]
+            start_point_id = loop.ordered_point_ids[index]
+            end_point_id = loop.ordered_point_ids[(index + 1) % len(loop.ordered_point_ids)]
+            line_tag = line_tags_by_edge_id[edge_id]
+            if edge.start_point_id == start_point_id and edge.end_point_id == end_point_id:
+                ordered_line_tags.append(line_tag)
+            elif edge.start_point_id == end_point_id and edge.end_point_id == start_point_id:
+                ordered_line_tags.append(-line_tag)
+            else:
+                raise ValueError(f"Geometry edge {edge_id!r} does not match the face loop order")
+        curve_loop_tag = gmsh.model.geo.addCurveLoop(ordered_line_tags)
+        surface_tags_by_face_id[loop.face_id] = gmsh.model.geo.addPlaneSurface([curve_loop_tag])
+
     gmsh.model.geo.synchronize()
 
     last_error: Exception | None = None
@@ -134,42 +147,48 @@ def _generate_with_gmsh_model(
         gmsh_tag_to_mesh_id[int(node_tag)] = mesh_node_id
         node_coordinates[mesh_node_id] = (x, y)
 
-    element_types, _, element_node_tags = gmsh.model.mesh.getElements(2, surface_tag)
-    triangle_node_ids: list[list[int]] = []
-    for element_type, node_tags_for_type in zip(element_types, element_node_tags):
-        if int(element_type) != 2:
-            continue
-        tags = [int(tag) for tag in node_tags_for_type]
-        for index in range(0, len(tags), 3):
-            try:
-                triangle_node_ids.append(
-                    [
-                        gmsh_tag_to_mesh_id[tags[index]],
-                        gmsh_tag_to_mesh_id[tags[index + 1]],
-                        gmsh_tag_to_mesh_id[tags[index + 2]],
-                    ]
-                )
-            except KeyError as exc:
-                raise ValueError(f"Gmsh triangle references unknown node tag {exc.args[0]!r}") from exc
+    triangle_rows: list[tuple[list[int], str]] = []
+    for face_id, surface_tag in surface_tags_by_face_id.items():
+        element_types, _, element_node_tags = gmsh.model.mesh.getElements(2, surface_tag)
+        for element_type, node_tags_for_type in zip(element_types, element_node_tags):
+            if int(element_type) != 2:
+                continue
+            tags = [int(tag) for tag in node_tags_for_type]
+            for index in range(0, len(tags), 3):
+                try:
+                    triangle_rows.append(
+                        (
+                            [
+                                gmsh_tag_to_mesh_id[tags[index]],
+                                gmsh_tag_to_mesh_id[tags[index + 1]],
+                                gmsh_tag_to_mesh_id[tags[index + 2]],
+                            ],
+                            face_id,
+                        )
+                    )
+                except KeyError as exc:
+                    raise ValueError(
+                        f"Gmsh triangle references unknown node tag {exc.args[0]!r}"
+                    ) from exc
 
-    if not triangle_node_ids:
+    if not triangle_rows:
         raise ValueError("Gmsh did not generate any 3-node triangle elements")
 
     return {
         "node_coordinates": node_coordinates,
-        "triangle_node_ids": triangle_node_ids,
+        "triangle_rows": triangle_rows,
     }
 
 
 def _build_mesh_model(
     geometry: GeometryModel,
-    loop: BoundaryLoop,
+    loops: list[BoundaryLoop],
     target_size: float,
     max_area: float | None,
     min_angle: float,
     polygon_area: float,
     node_coordinates: dict[int, tuple[float, float]],
-    triangle_node_ids: list[list[int]],
+    triangle_rows: list[tuple[list[int], str]],
 ) -> MeshModel:
     nodes = [
         MeshNode(id=node_id, x=coord[0], y=coord[1])
@@ -178,7 +197,7 @@ def _build_mesh_model(
 
     elements: list[MeshElement] = []
     element_areas: list[float] = []
-    for element_id, node_ids in enumerate(triangle_node_ids, start=1):
+    for element_id, (node_ids, face_id) in enumerate(triangle_rows, start=1):
         coords = [node_coordinates[node_id] for node_id in node_ids]
         signed_area = _signed_area(coords)
         if abs(signed_area) <= _EPS:
@@ -192,7 +211,7 @@ def _build_mesh_model(
                 id=element_id,
                 node_ids=list(node_ids),
                 element_type="CST",
-                source_face_id=loop.face_id,
+                source_face_id=face_id,
             )
         )
 
@@ -245,6 +264,7 @@ def _build_mesh_model(
             "p90_element_area": p90_area,
             "p90_p10_area_ratio": p90_p10_ratio,
             "warnings": warnings,
+            "face_ids": [loop.face_id for loop in loops],
         },
     )
     quality = build_mesh_quality_summary(mesh)
@@ -344,7 +364,7 @@ def _map_geometry_edges_to_element_edges(
 
 def _validate_gmsh_mesh_integrity(
     geometry: GeometryModel,
-    loop: BoundaryLoop,
+    loops: list[BoundaryLoop],
     mesh: MeshModel,
 ) -> None:
     coverage = validate_mesh_covers_geometry(geometry, mesh, tolerance=0.03)
@@ -369,9 +389,12 @@ def _validate_gmsh_mesh_integrity(
         raise ValueError("Not all geometry edges are mapped to Gmsh mesh nodes")
     if set(mesh.geometry_edge_to_mesh_element_edges) != {edge.id for edge in geometry.edges}:
         raise ValueError("Not all geometry edges are mapped to mesh element edges")
-    if any(element.source_face_id != loop.face_id for element in mesh.elements):
-        raise ValueError("Mesh elements are not tagged with the source face id")
-    if len(mesh.elements) < max(1, len(loop.ordered_point_ids) - 2):
+    expected_face_ids = {loop.face_id for loop in loops}
+    actual_face_ids = {element.source_face_id for element in mesh.elements}
+    if expected_face_ids - actual_face_ids:
+        raise ValueError("Mesh elements are not tagged with every source face id")
+    minimum_element_count = max(1, sum(max(1, len(loop.ordered_point_ids) - 2) for loop in loops))
+    if len(mesh.elements) < minimum_element_count:
         raise ValueError("Gmsh generated too few triangle elements")
 
     quality = build_mesh_quality_summary(mesh)
