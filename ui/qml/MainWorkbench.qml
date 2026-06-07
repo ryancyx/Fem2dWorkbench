@@ -23,6 +23,9 @@ ApplicationWindow {
     property real lastMouseY: 0.0
     property bool isPanning: false
     property bool isDraggingPoint: false
+    property bool viewportClickCandidate: false
+    property real viewportPressX: 0.0
+    property real viewportPressY: 0.0
     property real sketchOriginX: 0.0
     property real sketchOriginY: 0.0
     property real sketchDrawScale: 100.0
@@ -1003,6 +1006,11 @@ ApplicationWindow {
     }
 
     function handleViewportClick(mouseX, mouseY) {
+        // Always refresh the model-to-screen frame before hit testing or
+        // converting a click to model coordinates. This avoids stale
+        // coordinates after side-panel width/layout changes.
+        updateViewportGeometryFrame()
+
         if (currentMode === "建模与材料") {
             handleModelingClick(mouseX, mouseY)
             return
@@ -1035,6 +1043,7 @@ ApplicationWindow {
     }
 
     function startPointDragIfNeeded(mouseX, mouseY) {
+        updateViewportGeometryFrame()
         if (currentMode === "建模与材料" && bridge.partEditTool === "移动节点") {
             var pointId = findNearestPointAt(mouseX, mouseY)
             if (pointId !== "") {
@@ -1419,22 +1428,34 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 hoverEnabled: true
+
                                 onPressed: function(mouse) {
                                     root.lastMouseX = mouse.x
                                     root.lastMouseY = mouse.y
+                                    root.viewportPressX = mouse.x
+                                    root.viewportPressY = mouse.y
+                                    root.viewportClickCandidate = mouse.button === Qt.LeftButton
+
                                     if (mouse.button === Qt.RightButton) {
                                         root.isPanning = true
+                                        root.viewportClickCandidate = false
                                     } else {
                                         root.startPointDragIfNeeded(mouse.x, mouse.y)
+                                        if (root.isDraggingPoint) {
+                                            root.viewportClickCandidate = false
+                                        }
                                     }
                                 }
-                                onClicked: function(mouse) {
-                                    if (!root.isDraggingPoint && mouse.button === Qt.LeftButton) {
-                                        root.handleViewportClick(mouse.x, mouse.y)
-                                    }
-                                }
+
                                 onPositionChanged: function(mouse) {
+                                    var dx = mouse.x - root.viewportPressX
+                                    var dy = mouse.y - root.viewportPressY
+                                    if (root.viewportClickCandidate && Math.sqrt(dx * dx + dy * dy) > 4) {
+                                        root.viewportClickCandidate = false
+                                    }
+
                                     if (root.isDraggingPoint) {
+                                        root.updateViewportGeometryFrame()
                                         var modelPos = root.screenToModel(mouse.x, mouse.y)
                                         bridge.updateSelectedSketchPoint(modelPos.x, modelPos.y)
                                         root.repaintViewport()
@@ -1446,11 +1467,22 @@ ApplicationWindow {
                                         root.repaintViewport()
                                     }
                                 }
-                                onReleased: {
+
+                                onReleased: function(mouse) {
+                                    if (root.viewportClickCandidate
+                                            && mouse.button === Qt.LeftButton
+                                            && !root.isDraggingPoint
+                                            && !root.isPanning) {
+                                        root.handleViewportClick(mouse.x, mouse.y)
+                                    }
+
+                                    root.viewportClickCandidate = false
                                     root.isDraggingPoint = false
                                     root.isPanning = false
                                 }
+
                                 onCanceled: {
+                                    root.viewportClickCandidate = false
                                     root.isDraggingPoint = false
                                     root.isPanning = false
                                 }
@@ -1737,69 +1769,4 @@ ApplicationWindow {
     }
 
 
-    Rectangle {
-        id: leftPanelToggleHandle
-        z: 1000
-        width: 22
-        height: 58
-        radius: 11
-        color: leftHandleMouseArea.containsMouse ? "#DCEBFF" : "#F1F5F9"
-        border.color: "#CBD5E1"
-        opacity: 0.96
-        x: root.leftPanelVisible ? Math.max(0, root.leftPanelWidth + 18 - width / 2) : 0
-        y: Math.max(104, root.height / 2 - height / 2)
-
-        Text {
-            anchors.centerIn: parent
-            text: root.leftPanelVisible ? "◀" : "▶"
-            color: "#64748B"
-            font.pixelSize: 14
-            font.bold: true
-        }
-
-        MouseArea {
-            id: leftHandleMouseArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: {
-                root.leftPanelVisible = !root.leftPanelVisible
-                root.leftPanelWidth = root.leftPanelVisible ? root.defaultLeftPanelWidth : 0
-                root.repaintViewport()
-            }
-        }
-    }
-
-    Rectangle {
-        id: rightPanelToggleHandle
-        z: 1000
-        width: 22
-        height: 58
-        radius: 11
-        color: rightHandleMouseArea.containsMouse ? "#DCEBFF" : "#F1F5F9"
-        border.color: "#CBD5E1"
-        opacity: 0.96
-        x: root.rightPanelVisible ? root.width - root.rightPanelWidth - 18 - width / 2 : root.width - width
-        y: Math.max(104, root.height / 2 - height / 2)
-
-        Text {
-            anchors.centerIn: parent
-            text: root.rightPanelVisible ? "▶" : "◀"
-            color: "#64748B"
-            font.pixelSize: 14
-            font.bold: true
-        }
-
-        MouseArea {
-            id: rightHandleMouseArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: {
-                root.rightPanelVisible = !root.rightPanelVisible
-                root.rightPanelWidth = root.rightPanelVisible ? root.defaultRightPanelWidth : 0
-                root.repaintViewport()
-            }
-        }
-    }
 }

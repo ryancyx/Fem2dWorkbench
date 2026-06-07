@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -52,14 +52,14 @@ from core.engineering.engineering_project import EngineeringProject
 from core.engineering.load_definition import LoadDefinition
 from core.engineering.mesh_model import MeshModel
 from core.meshing.quality_sketch_mesher import generate_quality_sketch_tri_mesh
+from core.meshing.sketch_polygon_mesher import generate_sketch_tri_mesh
 from core.solver.solver_api import solve_static_linear
 from services.assembly_edit_service import (
     add_instance,
     delete_instance,
+    ensure_default_instance,
     list_instances,
     move_instance,
-    move_instance_by_delta,
-    move_instance_reference_point_to,
     rename_instance,
     set_active_instance,
 )
@@ -68,11 +68,6 @@ from services.export_service import (
     export_element_results_csv,
     export_node_displacements_csv,
     export_result_summary_txt,
-)
-from services.face_material_service import (
-    assign_material_to_face,
-    get_face_material_info,
-    get_part_face_material_rows,
 )
 from services.material_manager_service import (
     add_material,
@@ -83,12 +78,8 @@ from services.material_manager_service import (
     list_sections,
     update_material,
 )
-from services.mesh_quality_service import (
-    build_mesh_quality_summary,
-    validate_mesh_covers_geometry,
-)
+from services.mesh_quality_service import build_mesh_quality_summary
 from services.part_edit_service import (
-    add_sketch_part,
     add_rectangle_part,
     delete_part,
     get_active_part_id,
@@ -96,10 +87,7 @@ from services.part_edit_service import (
     rename_part,
     set_active_part,
 )
-from services.project_factory_service import (
-    create_empty_workbench_project,
-    create_rectangle_plate_project,
-)
+from services.project_factory_service import create_rectangle_plate_project
 from services.project_file_service import load_workbench_project, save_workbench_project
 from services.project_parameter_service import (
     WorkbenchProjectParameters,
@@ -113,10 +101,6 @@ from services.result_service import (
     build_element_result_rows,
     build_node_displacement_rows,
     build_result_summary,
-)
-from services.result_query_service import (
-    format_result_query_text,
-    query_result_at_point,
 )
 from services.solve_service import WorkbenchSolveResult, solve_workbench_project
 from services.sketch_geometry_service import (
@@ -176,7 +160,6 @@ class WorkbenchBridge(QObject):
         self.active_instance_ty = 0.0
         self.instance_count = 0
         self.instance_options: list[str] = []
-        self.assembly_instances_json = "[]"
         self.sketch_point_count = 0
         self.sketch_edge_count = 0
         self.sketch_face_count = 0
@@ -264,6 +247,18 @@ class WorkbenchBridge(QObject):
     def selectedTargetId(self) -> str:
         return self.geometry_target_id
 
+    @Property(str, notify=sketchChanged)
+    def selectedGeometryType(self) -> str:
+        return self.selected_geometry_type
+
+    @Property(str, notify=sketchChanged)
+    def selectedGeometryId(self) -> str:
+        return self.selected_geometry_id
+
+    @Property(str, notify=sketchChanged)
+    def selectedFaceId(self) -> str:
+        return self.selected_sketch_face_id
+
     @Property(str, notify=partEditChanged)
     def sketchNodeRowsPreview(self) -> str:
         return self.sketch_node_rows_preview
@@ -310,6 +305,10 @@ class WorkbenchBridge(QObject):
 
     @Property(str, notify=projectChanged)
     def activePartFaceMaterialJson(self) -> str:
+        return self.active_part_face_material_json
+
+    @Property(str, notify=projectChanged)
+    def faceMaterialJson(self) -> str:
         return self.active_part_face_material_json
 
     @Property(float, notify=sketchMeshChanged)
@@ -537,10 +536,6 @@ class WorkbenchBridge(QObject):
     def instanceOptions(self) -> list[str]:
         return list(self.instance_options)
 
-    @Property(str, notify=instancesChanged)
-    def assemblyInstancesJson(self) -> str:
-        return self.assembly_instances_json
-
     @Property(int, notify=sketchChanged)
     def sketchPointCount(self) -> int:
         return self.sketch_point_count
@@ -578,10 +573,6 @@ class WorkbenchBridge(QObject):
         return self.selected_sketch_edge_id
 
     @Property(str, notify=sketchChanged)
-    def selectedSketchFaceId(self) -> str:
-        return self.selected_sketch_face_id
-
-    @Property(str, notify=sketchChanged)
     def sketchFixedEdgeId(self) -> str:
         return self.sketch_fixed_edge_id
 
@@ -606,6 +597,10 @@ class WorkbenchBridge(QObject):
         return self.sketch_edges_json
 
     @Property(str, notify=sketchChanged)
+    def sketchFacesJson(self) -> str:
+        return self.sketch_faces_json
+
+    @Property(str, notify=sketchChanged)
     def modelPointsJson(self) -> str:
         return self.sketch_points_json
 
@@ -628,22 +623,6 @@ class WorkbenchBridge(QObject):
     @Property(int, notify=sketchChanged)
     def modelFaceCount(self) -> int:
         return self.sketch_face_count
-
-    @Property(str, notify=sketchChanged)
-    def selectedGeometryType(self) -> str:
-        return self.selected_geometry_type
-
-    @Property(str, notify=sketchChanged)
-    def selectedGeometryId(self) -> str:
-        return self.selected_geometry_id
-
-    @Property(str, notify=sketchChanged)
-    def selectedFaceId(self) -> str:
-        return self.selected_sketch_face_id
-
-    @Property(str, notify=projectChanged)
-    def faceMaterialJson(self) -> str:
-        return self.active_part_face_material_json
 
     @Property(bool, notify=sketchMeshChanged)
     def hasSketchMesh(self) -> bool:
@@ -684,18 +663,29 @@ class WorkbenchBridge(QObject):
     @Slot(result=bool)
     def newProject(self) -> bool:
         try:
-            self.current_project = create_empty_workbench_project(
-                project_name="untitled_project",
+            self.current_project = create_rectangle_plate_project(
+                width=2.0,
+                height=1.0,
+                young_modulus=210e9,
+                poisson_ratio=0.3,
+                thickness=0.01,
+                qy=-1000.0,
+                project_name="single_model_project",
+                mesh_nx=4,
+                mesh_ny=2,
             )
             self.project_path = ""
             self.project_dirty = True
+            self._sync_instances_from_project()
+            self._sync_parts_from_project()
+            if self.active_part_id:
+                part = self.current_project.get_part_by_id(self.active_part_id)
+                if part is not None:
+                    part.name = "二维模型"
+                    part.geometry = create_empty_sketch_geometry()
+            self.current_project.loads = []
+            self.current_project.boundary_conditions = []
             self._reset_sketch_boundary_load_state(reset_load_values=True)
-            self.part_edit_mode = False
-            self.part_edit_tool = "选择"
-            self.selected_sketch_point_id = ""
-            self.selected_sketch_edge_id = ""
-            self.selected_sketch_face_id = ""
-            self.edge_start_point_id = ""
             self._clear_solution()
             self._clear_sketch_mesh(emit_signal=True)
             self._sync_instances_from_project()
@@ -704,7 +694,7 @@ class WorkbenchBridge(QObject):
             self._sync_sketch_from_active_part()
             self._sync_material_state_from_project()
             self._sync_boundary_load_state_from_project()
-            self._set_status_text("新建工程完成")
+            self._set_status_text("新建空白模型完成")
             self.projectChanged.emit()
             self.resultChanged.emit()
             return True
@@ -805,12 +795,9 @@ class WorkbenchBridge(QObject):
         if self.current_project is None:
             self._set_status_text("请先创建工程或打开工程")
             return False
-        if len(self.current_project.assembly.instances) > 1:
-            self._set_status_text("当前版本暂不支持多实例装配联合求解，请切换到单个零件求解")
-            return False
 
         try:
-            active_part_id = self.active_part_id or get_active_part_id(self.current_project)
+            active_part_id = self.active_instance_part_id or self.active_part_id or get_active_part_id(self.current_project)
             if not active_part_id:
                 self._set_status_text("没有活动零件")
                 return False
@@ -834,9 +821,13 @@ class WorkbenchBridge(QObject):
                 nx=nx,
                 ny=ny,
             )
-            self._store_solution(solution)
+            self.current_solution = solution
+            self.node_rows = build_node_displacement_rows(solution)
+            self.element_rows = build_element_result_rows(solution)
+            self.summary = build_result_summary(solution)
+            self._store_solution_rows()
             self._set_status_text(
-                f"求解完成：零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                f"求解完成：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
             self.resultChanged.emit()
             return True
@@ -851,6 +842,20 @@ class WorkbenchBridge(QObject):
             return False
 
         try:
+            matching_instance = None
+            for instance in self.current_project.assembly.instances:
+                if instance.part_id == part_id:
+                    matching_instance = instance
+                    break
+            if matching_instance is None:
+                add_instance(
+                    self.current_project,
+                    part_id=part_id,
+                    name="实例 " + str(len(self.current_project.assembly.instances) + 1),
+                    make_active=True,
+                )
+            else:
+                set_active_instance(self.current_project, matching_instance.id)
             set_active_part(self.current_project, part_id)
             self.project_dirty = True
             self._reset_sketch_boundary_load_state(reset_load_values=True)
@@ -885,6 +890,12 @@ class WorkbenchBridge(QObject):
                 make_active=True,
             )
             new_part_id = get_active_part_id(self.current_project)
+            add_instance(
+                self.current_project,
+                part_id=new_part_id,
+                name=name or "实例 " + str(len(self.current_project.assembly.instances) + 1),
+                make_active=True,
+            )
             self.project_dirty = True
             self._reset_sketch_boundary_load_state(reset_load_values=True)
             self._clear_solution()
@@ -901,37 +912,6 @@ class WorkbenchBridge(QObject):
             return True
         except Exception as exc:
             self._set_status_text(f"新增矩形零件失败: {exc}")
-            return False
-
-    @Slot(str, result=bool)
-    def addEmptySketchPart(self, name: str) -> bool:
-        if self.current_project is None:
-            self._set_status_text("请先新建或打开工程")
-            return False
-
-        try:
-            add_sketch_part(
-                self.current_project,
-                name=name,
-                make_active=True,
-            )
-            new_part_id = get_active_part_id(self.current_project)
-            self.project_dirty = True
-            self._reset_sketch_boundary_load_state(reset_load_values=True)
-            self._clear_solution()
-            self._clear_sketch_mesh(emit_signal=True)
-            self._sync_instances_from_project()
-            self._sync_parts_from_project()
-            self._sync_parameter_cache_from_project()
-            self._sync_sketch_from_active_part()
-            self._sync_material_state_from_project()
-            self._sync_boundary_load_state_from_project()
-            self._set_status_text(f"已新增草图零件：{self.active_part_name}")
-            self.projectChanged.emit()
-            self.resultChanged.emit()
-            return True
-        except Exception as exc:
-            self._set_status_text(f"新增草图零件失败: {exc}")
             return False
 
     @Slot(str, result=bool)
@@ -1022,8 +1002,6 @@ class WorkbenchBridge(QObject):
             return False
 
         try:
-            if not str(part_id).strip():
-                raise ValueError("请先选择零件")
             add_instance(
                 self.current_project,
                 part_id=part_id,
@@ -1090,60 +1068,6 @@ class WorkbenchBridge(QObject):
             self._set_status_text(f"移动活动实例失败: {exc}")
             return False
 
-    @Slot(str, float, float, result=bool)
-    def moveInstanceByDelta(self, instance_id: str, dx: float, dy: float) -> bool:
-        if self.current_project is None:
-            self._set_status_text("请先新建或打开工程")
-            return False
-        try:
-            move_instance_by_delta(self.current_project, instance_id, dx, dy)
-            set_active_instance(self.current_project, instance_id)
-            self.project_dirty = True
-            self._sync_instances_from_project()
-            self._sync_parts_from_project()
-            self._sync_sketch_from_active_part()
-            self._set_status_text(f"已移动实例：{instance_id}")
-            self.projectChanged.emit()
-            return True
-        except Exception as exc:
-            self._set_status_text(f"移动实例失败: {exc}")
-            return False
-
-    @Slot(float, float, float, float, result=bool)
-    def moveActiveInstanceReferencePointTo(
-        self,
-        local_x: float,
-        local_y: float,
-        target_x: float,
-        target_y: float,
-    ) -> bool:
-        if self.current_project is None:
-            self._set_status_text("请先新建或打开工程")
-            return False
-        if not self.active_instance_id:
-            self._set_status_text("请先创建/选择实例")
-            return False
-        try:
-            move_instance_reference_point_to(
-                self.current_project,
-                self.active_instance_id,
-                local_x,
-                local_y,
-                target_x,
-                target_y,
-            )
-            self.project_dirty = True
-            self._sync_instances_from_project()
-            self._set_status_text(
-                f"已将实例 {self.active_instance_id} 的参考点 ({local_x:.6g}, {local_y:.6g}) "
-                f"移动到 ({target_x:.6g}, {target_y:.6g})"
-            )
-            self.projectChanged.emit()
-            return True
-        except Exception as exc:
-            self._set_status_text(f"参考点移动失败: {exc}")
-            return False
-
     @Slot(result=bool)
     def deleteActiveInstance(self) -> bool:
         if self.current_project is None:
@@ -1195,7 +1119,7 @@ class WorkbenchBridge(QObject):
                 mesh_nx=mesh_nx,
                 mesh_ny=mesh_ny,
             )
-            if self.current_project is None or not self.current_project.parts:
+            if self.current_project is None:
                 self.current_project = create_rectangle_plate_project(
                     width=params.width,
                     height=params.height,
@@ -1203,7 +1127,7 @@ class WorkbenchBridge(QObject):
                     poisson_ratio=params.poisson_ratio,
                     thickness=params.thickness,
                     qy=params.qy,
-                    project_name=self.projectName or "ui_rectangle_demo",
+                    project_name="ui_rectangle_demo",
                     mesh_nx=params.mesh_nx,
                     mesh_ny=params.mesh_ny,
                 )
@@ -1302,9 +1226,25 @@ class WorkbenchBridge(QObject):
 
     @Slot(float, float, result=bool)
     def addSketchPointFromViewport(self, x: float, y: float) -> bool:
-        if self.current_project is not None and not self.active_part_id and not self.createEmptySketchForActivePart():
+        try:
+            self._ensure_single_model_part()
+            return self.addSketchPoint(x, y)
+        except Exception as exc:
+            self._set_status_text(f"视口新增模型点失败: {exc}")
             return False
-        return self.addSketchPoint(x, y)
+
+    @Slot(float, float, result=bool)
+    def addModelPointFromViewport(self, x: float, y: float) -> bool:
+        return self.addSketchPointFromViewport(x, y)
+
+    @Slot(float, float, result=bool)
+    def addModelPoint(self, x: float, y: float) -> bool:
+        try:
+            self._ensure_single_model_part()
+            return self.addSketchPoint(x, y)
+        except Exception as exc:
+            self._set_status_text(f"新增模型点失败: {exc}")
+            return False
 
     @Slot(float, float, result=bool)
     def updateSelectedSketchPoint(self, x: float, y: float) -> bool:
@@ -1410,96 +1350,13 @@ class WorkbenchBridge(QObject):
             self._set_status_text(f"应用材料失败: {exc}")
             return False
 
-    @Slot(str, result=bool)
-    def selectGeometryFace(self, face_id: str) -> bool:
-        try:
-            part = self._require_active_part()
-            if face_id and not any(face.id == face_id for face in part.geometry.faces):
-                raise ValueError(f"Unknown face id: {face_id}")
-            self.selected_sketch_face_id = str(face_id or "")
-            self.selected_sketch_point_id = ""
-            self.selected_sketch_edge_id = ""
-            self.selected_geometry_type = "face" if self.selected_sketch_face_id else ""
-            self.selected_geometry_id = self.selected_sketch_face_id
-            self.geometry_target_type = "face" if self.selected_sketch_face_id else ""
-            self.geometry_target_id = self.selected_sketch_face_id
-            self.sketchChanged.emit()
-            self.partEditChanged.emit()
-            self._set_status_text(
-                f"已选择闭合面：{self.selected_sketch_face_id}" if self.selected_sketch_face_id else "已清除闭合面选择"
-            )
-            return True
-        except Exception as exc:
-            self._set_status_text(f"选择闭合面失败: {exc}")
-            return False
-
     @Slot(str, float, result=bool)
     def assignMaterialToSelectedFace(self, material_id: str, thickness: float) -> bool:
-        if self.current_project is None:
-            self._set_status_text("请先新建或打开工程")
-            return False
-        if not self.active_part_id:
-            self._set_status_text("没有活动零件")
-            return False
-        if not self.selected_sketch_face_id:
-            self._set_status_text("请先选择闭合面")
-            return False
-        try:
-            assign_material_to_face(
-                self.current_project,
-                self.active_part_id,
-                self.selected_sketch_face_id,
-                material_id,
-                thickness,
-            )
-            self.project_dirty = True
-            self._sync_material_state_from_project()
-            self._set_status_text(f"已应用材料到闭合面 {self.selected_sketch_face_id}")
-            self.projectChanged.emit()
-            return True
-        except Exception as exc:
-            self._set_status_text(f"应用闭合面材料失败: {exc}")
-            return False
-
-    @Slot(str, str, float, result=bool)
-    def assignMaterialToFace(self, face_id: str, material_id: str, thickness: float) -> bool:
-        if not self.selectGeometryFace(face_id):
-            return False
-        return self.assignMaterialToSelectedFace(material_id, thickness)
-
-    @Slot(str, float, result=bool)
-    def assignMaterialToActivePartAllFaces(self, material_id: str, thickness: float) -> bool:
         return self.assignMaterialToActivePart(material_id, thickness)
 
     @Slot(str, float, result=bool)
     def assignMaterialToAllFaces(self, material_id: str, thickness: float) -> bool:
-        try:
-            self._ensure_single_model_part()
-            return self.assignMaterialToActivePart(material_id, thickness)
-        except Exception as exc:
-            self._set_status_text(f"应用材料到全部闭合面失败: {exc}")
-            return False
-
-    @Slot(str, str, float, result=bool)
-    def assignMaterialToPart(self, part_id: str, material_id: str, thickness: float) -> bool:
-        if self.current_project is None:
-            self._set_status_text("请先新建或打开工程")
-            return False
-        if not str(part_id).strip():
-            self._set_status_text("请先选择目标零件")
-            return False
-        try:
-            assign_material_to_part(self.current_project, part_id, material_id, thickness)
-            self.project_dirty = True
-            if self.active_part_id == part_id:
-                self._sync_parameter_cache_from_project()
-            self._sync_material_state_from_project()
-            self._set_status_text("已应用材料到目标零件")
-            self.projectChanged.emit()
-            return True
-        except Exception as exc:
-            self._set_status_text(f"应用材料失败: {exc}")
-            return False
+        return self.assignMaterialToActivePart(material_id, thickness)
 
     @Slot(float, float, float, result=bool)
     def generateQualityMeshForActivePart(
@@ -1523,23 +1380,13 @@ class WorkbenchBridge(QObject):
             self.mesh_min_angle = float(min_angle)
             self.current_mesh_type = str(mesh.metadata.get("mesh_type", "sketch_quality"))
             self._sync_sketch_mesh_from_current_mesh()
-            coverage = validate_mesh_covers_geometry(part.geometry, mesh, tolerance=0.03)
-            warnings = mesh.metadata.get("warnings", [])
-            warning_suffix = f"（{warnings[0]}）" if warnings else ""
             self._set_status_text(
-                f"Gmsh 网格生成成功：节点 {self.sketch_mesh_node_count}，单元 {self.sketch_mesh_element_count}，"
-                f"面积误差 {coverage.relative_area_error * 100.0:.2f}%{warning_suffix}"
+                f"高质量网格生成成功：节点 {self.sketch_mesh_node_count}，单元 {self.sketch_mesh_element_count}"
             )
             return True
         except Exception as exc:
             self._clear_sketch_mesh(emit_signal=True)
-            message = str(exc)
-            if "Gmsh meshing backend is not installed" in message:
-                self._set_status_text(
-                    "生成网格失败：当前环境未安装 Gmsh 网格后端，请先执行 python -m pip install gmsh。"
-                )
-            else:
-                self._set_status_text(f"生成网格失败：{exc}")
+            self._set_status_text(f"生成高质量网格失败: {exc}")
             return False
 
     @Slot(result=bool)
@@ -1548,36 +1395,13 @@ class WorkbenchBridge(QObject):
         self._set_status_text("已清除当前网格")
         return True
 
-    @Slot(float, float, result=bool)
-    def generateMesh(self, target_size: float, min_angle: float) -> bool:
-        try:
-            self._ensure_single_model_part()
-            return self.generateQualityMeshForActivePart(target_size, 0.0, min_angle)
-        except Exception as exc:
-            self._set_status_text(f"生成单模型网格失败: {exc}")
-            return False
-
     @Slot(result=bool)
     def clearMesh(self) -> bool:
         return self.clearCurrentMesh()
 
-    @Slot(result=bool)
-    def clearSelectionState(self) -> bool:
-        self.selected_sketch_point_id = ""
-        self.selected_sketch_edge_id = ""
-        self.selected_sketch_face_id = ""
-        self.selected_geometry_type = ""
-        self.selected_geometry_id = ""
-        self.edge_start_point_id = ""
-        self.geometry_target_type = ""
-        self.geometry_target_id = ""
-        self.sketchChanged.emit()
-        self.partEditChanged.emit()
-        return True
-
-    @Slot(result=bool)
-    def clearSelection(self) -> bool:
-        return self.clearSelectionState()
+    @Slot(float, float, result=bool)
+    def generateMesh(self, target_size: float, min_angle: float) -> bool:
+        return self.generateQualityMeshForActivePart(target_size, 0.0, min_angle)
 
     @Slot(str, result=bool)
     def selectGeometryPoint(self, point_id: str) -> bool:
@@ -1586,7 +1410,10 @@ class WorkbenchBridge(QObject):
                 return False
             self.geometry_target_type = "point" if point_id else ""
             self.geometry_target_id = str(point_id).strip()
+            self.selected_geometry_type = "point" if point_id else ""
+            self.selected_geometry_id = str(point_id).strip()
             self.partEditChanged.emit()
+            self.sketchChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"选择几何点失败: {exc}")
@@ -1599,7 +1426,10 @@ class WorkbenchBridge(QObject):
                 return False
             self.geometry_target_type = "edge" if edge_id else ""
             self.geometry_target_id = str(edge_id).strip()
+            self.selected_geometry_type = "edge" if edge_id else ""
+            self.selected_geometry_id = str(edge_id).strip()
             self.partEditChanged.emit()
+            self.sketchChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"选择几何边失败: {exc}")
@@ -1742,15 +1572,8 @@ class WorkbenchBridge(QObject):
         if self.current_project is None:
             self._set_status_text("请先新建或打开工程")
             return False
-        if len(self.current_project.assembly.instances) > 1:
-            self._set_status_text("当前版本暂不支持多实例装配联合求解，请切换到单个零件求解")
-            return False
         try:
             part = self._require_active_part()
-            material_error = self._validate_part_material_assignments(part)
-            if material_error:
-                self._set_status_text(f"求解失败: {material_error}")
-                return False
             edge_ids = {edge.id for edge in part.geometry.edges}
             if {"bottom", "right", "top", "left"}.issubset(edge_ids):
                 return self.solveCurrentProject(self.project_mesh_nx, self.project_mesh_ny)
@@ -1758,42 +1581,19 @@ class WorkbenchBridge(QObject):
             if not part.geometry.faces:
                 self._set_status_text("求解失败: 当前草图尚未生成闭合面")
                 return False
-            if self.current_sketch_mesh is None or self.current_mesh_type in {"none", "rectangle", "sketch_ear_clip"}:
+            if not self.current_project.boundary_conditions:
+                self._set_status_text("求解失败: 当前模型缺少约束")
+                return False
+            if not self.current_project.loads:
+                self._set_status_text("求解失败: 当前模型缺少载荷")
+                return False
+            if self.current_sketch_mesh is None or self.current_mesh_type != "sketch_quality":
                 if not self.generateQualityMeshForActivePart(
                     self.mesh_target_size,
                     self.mesh_max_area,
                     self.mesh_min_angle,
                 ):
                     return False
-
-            mesh = self.current_sketch_mesh
-            if mesh is None or not mesh.elements:
-                self._set_status_text("求解失败: 当前没有可用网格，请重新生成网格")
-                return False
-
-            coverage = validate_mesh_covers_geometry(part.geometry, mesh, tolerance=0.08)
-            if not coverage.is_valid:
-                if coverage.relative_area_error > 0.08:
-                    self._set_status_text("求解失败: 网格未完整覆盖闭合面，请重新生成网格")
-                elif coverage.unused_node_ids:
-                    self._set_status_text("求解失败: 存在未连接网格节点")
-                elif coverage.missing_edge_mapping_ids:
-                    self._set_status_text("求解失败: 几何边未正确映射到网格边")
-                else:
-                    self._set_status_text("求解失败: 当前网格存在退化或不完整单元")
-                return False
-
-            active_boundary_conditions, active_loads = self._definitions_for_active_part(part)
-            if not active_boundary_conditions:
-                self._set_status_text("求解失败: 当前模型缺少约束")
-                return False
-            if not active_loads:
-                self._set_status_text("求解失败: 当前模型缺少载荷")
-                return False
-            validation_error = self._validate_target_mappings(mesh, active_boundary_conditions, active_loads)
-            if validation_error:
-                self._set_status_text(f"求解失败: {validation_error}")
-                return False
 
             step_id = self._default_step_id()
             temp_project = EngineeringProject(
@@ -1803,24 +1603,28 @@ class WorkbenchBridge(QObject):
                 parts=[part],
                 assembly=self.current_project.assembly,
                 analysis_steps=list(self.current_project.analysis_steps),
-                loads=active_loads,
-                boundary_conditions=active_boundary_conditions,
+                loads=list(self.current_project.loads),
+                boundary_conditions=list(self.current_project.boundary_conditions),
                 metadata=dict(self.current_project.metadata),
             )
             compiled_bundle = compile_workbench_project(
                 project=temp_project,
-                mesh=mesh,
+                mesh=self.current_sketch_mesh,
                 step_id=step_id,
             )
             solver_result = solve_static_linear(compiled_bundle.fem_model)
             solution = WorkbenchSolveResult(
                 project=temp_project,
-                mesh=mesh,
+                mesh=self.current_sketch_mesh,
                 compiled_bundle=compiled_bundle,
                 solver_result=solver_result,
                 warnings=list(compiled_bundle.warnings),
             )
-            self._store_solution(solution)
+            self.current_solution = solution
+            self.node_rows = build_node_displacement_rows(solution)
+            self.element_rows = build_element_result_rows(solution)
+            self.summary = build_result_summary(solution)
+            self._store_solution_rows()
             self._set_status_text(
                 f"求解完成：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
@@ -1839,20 +1643,22 @@ class WorkbenchBridge(QObject):
 
     @Slot(float, float, result=bool)
     def queryResultAtPoint(self, x: float, y: float) -> bool:
-        if self.current_solution is None:
+        if self.current_solution is None or not self.node_rows:
             self._set_status_text("请先完成求解，再查询结果")
             return False
         try:
-            summary = query_result_at_point(
-                mesh=self.current_solution.mesh,
-                node_rows=self.node_rows,
-                element_rows=self.element_rows,
-                x=float(x),
-                y=float(y),
+            x = float(x)
+            y = float(y)
+            nearest = min(self.node_rows, key=lambda row: (row.x - x) ** 2 + (row.y - y) ** 2)
+            self.result_query_x = x
+            self.result_query_y = y
+            self.result_query_text = (
+                f"查询点 ({x:.6g}, {y:.6g})\n"
+                f"最近节点: {nearest.node_id}\n"
+                f"ux = {nearest.ux:.6e}\n"
+                f"uy = {nearest.uy:.6e}\n"
+                f"|u| = {nearest.u_magnitude:.6e}"
             )
-            self.result_query_x = float(x)
-            self.result_query_y = float(y)
-            self.result_query_text = format_result_query_text(summary)
             self.resultChanged.emit()
             self._set_status_text("已更新结果查询")
             return True
@@ -1863,7 +1669,7 @@ class WorkbenchBridge(QObject):
     @Slot(result=bool)
     def createEmptySketchForActivePart(self) -> bool:
         try:
-            part = self._ensure_active_part_for_sketch_edit()
+            part = self._require_active_part()
             part.geometry = create_empty_sketch_geometry()
             self.current_project.loads = []
             self.current_project.boundary_conditions = []
@@ -1881,24 +1687,6 @@ class WorkbenchBridge(QObject):
             return True
         except Exception as exc:
             self._set_status_text(f"创建空草图失败: {exc}")
-            return False
-
-    @Slot(float, float, result=bool)
-    def addModelPoint(self, x: float, y: float) -> bool:
-        try:
-            self._ensure_single_model_part()
-            return self.addSketchPoint(x, y)
-        except Exception as exc:
-            self._set_status_text(f"新增模型点失败: {exc}")
-            return False
-
-    @Slot(float, float, result=bool)
-    def addModelPointFromViewport(self, x: float, y: float) -> bool:
-        try:
-            self._ensure_single_model_part()
-            return self.addSketchPointFromViewport(x, y)
-        except Exception as exc:
-            self._set_status_text(f"视口新增模型点失败: {exc}")
             return False
 
     @Slot(float, float, result=bool)
@@ -1934,10 +1722,6 @@ class WorkbenchBridge(QObject):
         except Exception as exc:
             self._set_status_text(f"移动草图点失败: {exc}")
             return False
-
-    @Slot(str, float, float, result=bool)
-    def moveModelPoint(self, point_id: str, x: float, y: float) -> bool:
-        return self.moveSketchPoint(point_id, x, y)
 
     @Slot(str, result=bool)
     def deleteSketchPoint(self, point_id: str) -> bool:
@@ -1984,6 +1768,7 @@ class WorkbenchBridge(QObject):
             self._set_status_text(f"连接模型边失败: {exc}")
             return False
 
+
     @Slot(str, result=bool)
     def deleteSketchEdge(self, edge_id: str) -> bool:
         try:
@@ -2027,6 +1812,7 @@ class WorkbenchBridge(QObject):
             self._set_status_text(f"生成模型闭合面失败: {exc}")
             return False
 
+
     @Slot(result=bool)
     def clearSketch(self) -> bool:
         try:
@@ -2055,6 +1841,7 @@ class WorkbenchBridge(QObject):
             self._set_status_text(f"清空模型几何失败: {exc}")
             return False
 
+
     @Slot(str, result=bool)
     def selectSketchPoint(self, point_id: str) -> bool:
         try:
@@ -2062,16 +1849,7 @@ class WorkbenchBridge(QObject):
             if point_id and not any(point.id == point_id for point in part.geometry.points):
                 raise ValueError(f"Unknown sketch point id: {point_id}")
             self.selected_sketch_point_id = point_id
-            if point_id:
-                self.selected_sketch_edge_id = ""
-                self.selected_sketch_face_id = ""
-                self.selected_geometry_type = "point"
-                self.selected_geometry_id = point_id
-            else:
-                self.selected_geometry_type = ""
-                self.selected_geometry_id = ""
             self._set_status_text(f"已选择草图点：{point_id}" if point_id else "已清除草图点选择")
-            self.partEditChanged.emit()
             self.sketchChanged.emit()
             return True
         except Exception as exc:
@@ -2087,23 +1865,51 @@ class WorkbenchBridge(QObject):
                 raise ValueError(f"Unknown sketch edge id: {edge_id}")
             self.selected_sketch_edge_id = edge_id
             if edge_id:
-                self.selected_sketch_point_id = ""
-                self.selected_sketch_face_id = ""
-                self.selected_geometry_type = "edge"
-                self.selected_geometry_id = edge_id
-            else:
-                self.selected_geometry_type = ""
-                self.selected_geometry_id = ""
-            if edge_id:
                 self._set_status_text(f"已选择草图边：{edge_id}")
             else:
                 self._set_status_text("已清除草图边选择")
-            self.partEditChanged.emit()
             self.sketchChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"选择草图边失败: {exc}")
             return False
+
+    @Slot(str, result=bool)
+    def selectGeometryFace(self, face_id: str) -> bool:
+        try:
+            part = self._require_active_part()
+            face_id = str(face_id).strip()
+            if face_id and not any(face.id == face_id for face in part.geometry.faces):
+                raise ValueError(f"Unknown face id: {face_id}")
+            self.selected_sketch_face_id = face_id
+            self.selected_sketch_point_id = ""
+            self.selected_sketch_edge_id = ""
+            self.selected_geometry_type = "face" if face_id else ""
+            self.selected_geometry_id = face_id
+            self.geometry_target_type = ""
+            self.geometry_target_id = ""
+            self.sketchChanged.emit()
+            self.partEditChanged.emit()
+            self._set_status_text(f"已选择闭合面：{face_id}" if face_id else "已清除闭合面选择")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"选择闭合面失败: {exc}")
+            return False
+
+    @Slot(result=bool)
+    def clearSelection(self) -> bool:
+        self.selected_sketch_point_id = ""
+        self.selected_sketch_edge_id = ""
+        self.selected_sketch_face_id = ""
+        self.selected_geometry_type = ""
+        self.selected_geometry_id = ""
+        self.geometry_target_type = ""
+        self.geometry_target_id = ""
+        self.edge_start_point_id = ""
+        self.sketchChanged.emit()
+        self.partEditChanged.emit()
+        return True
+
 
     @Slot(result=bool)
     def setSelectedSketchEdgeAsFixed(self) -> bool:
@@ -2143,14 +1949,18 @@ class WorkbenchBridge(QObject):
     @Slot(result=bool)
     def generateSketchMeshForActivePart(self) -> bool:
         try:
-            return self.generateQualityMeshForActivePart(
-                self.mesh_target_size,
-                self.mesh_max_area,
-                self.mesh_min_angle,
+            part = self._require_active_part()
+            mesh = generate_sketch_tri_mesh(part.geometry)
+            self.current_sketch_mesh = mesh
+            self.current_mesh_type = "sketch_ear_clip"
+            self._sync_sketch_mesh_from_current_mesh()
+            self._set_status_text(
+                f"草图网格生成成功：节点 {self.sketch_mesh_node_count}，单元 {self.sketch_mesh_element_count}"
             )
+            return True
         except Exception as exc:
             self._clear_sketch_mesh(emit_signal=True)
-            self._set_status_text(f"生成网格失败：{exc}")
+            self._set_status_text(f"生成草图网格失败: {exc}")
             return False
 
     @Slot(result=bool)
@@ -2202,14 +2012,8 @@ class WorkbenchBridge(QObject):
             self.sketch_load_qy = float(qy)
 
             if self.current_sketch_mesh is None:
-                mesh = generate_quality_sketch_tri_mesh(
-                    part.geometry,
-                    target_size=self.mesh_target_size,
-                    max_area=self.mesh_max_area if self.mesh_max_area > 0.0 else None,
-                    min_angle=self.mesh_min_angle,
-                )
+                mesh = generate_sketch_tri_mesh(part.geometry)
                 self.current_sketch_mesh = mesh
-                self.current_mesh_type = str(mesh.metadata.get("mesh_type", "gmsh_cst"))
                 self._sync_sketch_mesh_from_current_mesh()
             else:
                 mesh = self.current_sketch_mesh
@@ -2266,7 +2070,11 @@ class WorkbenchBridge(QObject):
                 solver_result=solver_result,
                 warnings=list(compiled_bundle.warnings),
             )
-            self._store_solution(solution)
+            self.current_solution = solution
+            self.node_rows = build_node_displacement_rows(solution)
+            self.element_rows = build_element_result_rows(solution)
+            self.summary = build_result_summary(solution)
+            self._store_solution_rows()
             self._set_status_text(
                 f"草图求解完成：固定边 {fixed_edge_id}，载荷边 {load_edge_id}，"
                 f"节点 {self.summary.node_count}，单元 {self.summary.element_count}"
@@ -2307,39 +2115,19 @@ class WorkbenchBridge(QObject):
     def _require_active_part(self):
         if self.current_project is None:
             raise ValueError("请先新建或打开工程")
-        if not self.current_project.parts:
-            raise ValueError("当前工程还没有零件")
         active_part_id = self.active_part_id or get_active_part_id(self.current_project)
         part = self.current_project.get_part_by_id(active_part_id)
         if part is None:
             raise ValueError(f"Unknown active part id: {active_part_id}")
         return part
 
-    def _ensure_active_part_for_sketch_edit(self):
-        if self.current_project is None:
-            raise ValueError("请先新建或打开工程")
-        if self.current_project.parts:
-            return self._require_active_part()
-
-        add_sketch_part(
-            self.current_project,
-            name="sketch_part",
-            make_active=True,
-        )
-        self._sync_instances_from_project()
-        self._sync_parts_from_project()
-        self._sync_parameter_cache_from_project()
-        self._sync_material_state_from_project()
-        return self._require_active_part()
-
     def _ensure_single_model_part(self):
-        part = self._ensure_active_part_for_sketch_edit()
-        if len(self.current_project.parts) == 1 and (
-            part.id.startswith("part_sketch") or part.name in {"sketch_part", "rectangle_plate"}
-        ):
-            part.id = "model_part"
+        if self.current_project is None:
+            if not self.newProject():
+                raise ValueError("无法新建空白模型")
+        part = self._require_active_part()
+        if part.name != "二维模型":
             part.name = "二维模型"
-            self.current_project.metadata["active_part_id"] = part.id
         return part
 
     def _clear_solution(self) -> None:
@@ -2353,12 +2141,7 @@ class WorkbenchBridge(QObject):
         self.node_rows_json = "[]"
         self.element_rows_json = "[]"
 
-    def _store_solution(self, solution: WorkbenchSolveResult) -> None:
-        self.current_solution = solution
-        self.node_rows = build_node_displacement_rows(solution)
-        self.element_rows = build_element_result_rows(solution)
-        self.summary = build_result_summary(solution)
-        self.result_query_text = ""
+    def _store_solution_rows(self) -> None:
         self.node_rows_json = json.dumps(
             [row.to_dict() for row in self.node_rows],
             ensure_ascii=False,
@@ -2367,14 +2150,13 @@ class WorkbenchBridge(QObject):
             [row.to_dict() for row in self.element_rows],
             ensure_ascii=False,
         )
-        if not self.result_query_text and self.node_rows:
-            first_node = self.node_rows[0]
-            self.result_query_x = first_node.x
-            self.result_query_y = first_node.y
 
     def _reset_sketch_boundary_load_state(self, reset_load_values: bool = False) -> None:
+        self.selected_sketch_point_id = ""
         self.selected_sketch_edge_id = ""
         self.selected_sketch_face_id = ""
+        self.selected_geometry_type = ""
+        self.selected_geometry_id = ""
         self.sketch_fixed_edge_id = ""
         self.sketch_load_edge_id = ""
         if reset_load_values:
@@ -2413,22 +2195,10 @@ class WorkbenchBridge(QObject):
             self.active_instance_ty = 0.0
             self.instance_count = 0
             self.instance_options = []
-            self.assembly_instances_json = "[]"
             self.instancesChanged.emit()
             return
 
-        if not self.current_project.parts:
-            self.active_instance_id = ""
-            self.active_instance_name = ""
-            self.active_instance_part_id = ""
-            self.active_instance_tx = 0.0
-            self.active_instance_ty = 0.0
-            self.instance_count = 0
-            self.instance_options = []
-            self.assembly_instances_json = "[]"
-            self.instancesChanged.emit()
-            return
-
+        ensure_default_instance(self.current_project)
         instance_rows = list_instances(self.current_project)
         active_instance = next((row for row in instance_rows if row["is_active"]), None)
         self.active_instance_id = str(active_instance["id"]) if active_instance is not None else ""
@@ -2438,75 +2208,35 @@ class WorkbenchBridge(QObject):
         self.active_instance_ty = float(active_instance["ty"]) if active_instance is not None else 0.0
         self.instance_count = len(instance_rows)
         self.instance_options = [
-            f"{row['id']} | {row['name']} | {row['part_id']} | tx={row['tx']:.3f} | ty={row['ty']:.3f}"
+            f"{row['id']} | {row['name']} | {row['part_id']}"
             for row in instance_rows
         ]
-        self.assembly_instances_json = json.dumps(
-            self._build_assembly_instance_rows(instance_rows),
-            ensure_ascii=False,
-        )
+        if self.active_instance_part_id:
+            self.current_project.metadata["active_part_id"] = self.active_instance_part_id
         self.instancesChanged.emit()
-
-    def _build_assembly_instance_rows(self, instance_rows: list[dict]) -> list[dict]:
-        if self.current_project is None:
-            return []
-
-        rows: list[dict] = []
-        for instance_row in instance_rows:
-            part_id = str(instance_row.get("part_id", "") or "")
-            part = self.current_project.get_part_by_id(part_id)
-            if part is None:
-                print(
-                    f"Warning: assembly instance references missing part {part_id!r}",
-                    file=sys.stderr,
-                )
-                continue
-            rows.append(
-                {
-                    "id": str(instance_row.get("id", "") or ""),
-                    "name": str(instance_row.get("name", "") or ""),
-                    "part_id": part_id,
-                    "part_name": str(instance_row.get("part_name", "") or part.name),
-                    "tx": float(instance_row.get("tx", 0.0) or 0.0),
-                    "ty": float(instance_row.get("ty", 0.0) or 0.0),
-                    "rotation": float(instance_row.get("rotation", 0.0) or 0.0),
-                    "is_active": bool(instance_row.get("is_active", False)),
-                    "points": [point.to_dict() for point in part.geometry.points],
-                    "edges": [edge.to_dict() for edge in part.geometry.edges],
-                    "faces": [face.to_dict() for face in part.geometry.faces],
-                    "face_materials": get_part_face_material_rows(self.current_project, part_id),
-                }
-            )
-        return rows
 
     def _sync_parameter_cache_from_project(self) -> None:
         if self.current_project is None:
-            self.projectParametersChanged.emit()
-            return
-
-        if not self.current_project.parts:
-            self.projectParametersChanged.emit()
             return
 
         if not self.active_part_id:
             self.active_part_id = get_active_part_id(self.current_project)
-
         try:
             params = extract_workbench_project_parameters(
                 self.current_project,
                 self.active_part_id,
             )
-            self.project_width = float(params.width)
-            self.project_height = float(params.height)
-            self.project_young_modulus = float(params.young_modulus)
-            self.project_poisson_ratio = float(params.poisson_ratio)
-            self.project_thickness = float(params.thickness)
-            self.project_edge_qy = float(params.qy)
-            self.project_mesh_nx = int(params.mesh_nx)
-            self.project_mesh_ny = int(params.mesh_ny)
-        except Exception:
-            # Keep the last good cache so QML can still open even if one part is incomplete.
-            pass
+        except ValueError:
+            self.projectParametersChanged.emit()
+            return
+        self.project_width = params.width
+        self.project_height = params.height
+        self.project_young_modulus = params.young_modulus
+        self.project_poisson_ratio = params.poisson_ratio
+        self.project_thickness = params.thickness
+        self.project_edge_qy = params.qy
+        self.project_mesh_nx = params.mesh_nx
+        self.project_mesh_ny = params.mesh_ny
         self.projectParametersChanged.emit()
 
     def _sync_sketch_from_active_part(self) -> None:
@@ -2520,12 +2250,12 @@ class WorkbenchBridge(QObject):
             self.sketch_has_face = False
             self.selected_sketch_point_id = ""
             self.selected_sketch_edge_id = ""
-            self.selected_sketch_face_id = ""
             self.sketch_fixed_edge_id = ""
             self.sketch_load_edge_id = ""
             self.sketch_points_json = "[]"
             self.sketch_edges_json = "[]"
             self.sketch_faces_json = "[]"
+            self.selected_sketch_face_id = ""
             self.selected_geometry_type = ""
             self.selected_geometry_id = ""
             self.sketchChanged.emit()
@@ -2542,12 +2272,12 @@ class WorkbenchBridge(QObject):
             self.sketch_has_face = False
             self.selected_sketch_point_id = ""
             self.selected_sketch_edge_id = ""
-            self.selected_sketch_face_id = ""
             self.sketch_fixed_edge_id = ""
             self.sketch_load_edge_id = ""
             self.sketch_points_json = "[]"
             self.sketch_edges_json = "[]"
             self.sketch_faces_json = "[]"
+            self.selected_sketch_face_id = ""
             self.selected_geometry_type = ""
             self.selected_geometry_id = ""
             self.sketchChanged.emit()
@@ -2649,24 +2379,12 @@ class WorkbenchBridge(QObject):
             f"节点 {self.sketch_mesh_node_count}，单元 {self.sketch_mesh_element_count}"
         )
         summary = build_mesh_quality_summary(mesh)
-        metadata = mesh.metadata
-        backend = str(metadata.get("mesher_backend", ""))
-        backend_label = "Gmsh" if backend == "gmsh" else (backend or "unknown")
-        target_size = metadata.get("target_size")
-        relative_area_error = metadata.get("relative_area_error")
-        p90_p10_ratio = metadata.get("p90_p10_area_ratio")
-        mesh_warnings = metadata.get("warnings", [])
         self.mesh_quality_summary_text = (
-            f"后端 {backend_label}，节点 {summary.node_count}，单元 {summary.element_count}，"
-            f"目标边长 {float(target_size) if target_size is not None else 0.0:.6g}，"
-            f"面积误差 {float(relative_area_error) * 100.0 if relative_area_error is not None else 0.0:.3f}%，"
-            f"最小角 {summary.min_angle:.3f}°，"
-            f"面积比 P90/P10 {float(p90_p10_ratio) if p90_p10_ratio is not None else 0.0:.3f}，"
-            f"警告 {len(mesh_warnings)}，"
+            f"节点 {summary.node_count}，单元 {summary.element_count}，"
+            f"最小面积 {summary.min_area:.6g}，最大面积 {summary.max_area:.6g}，"
+            f"平均面积 {summary.avg_area:.6g}，最小角 {summary.min_angle:.3f}°，"
             f"退化单元 {summary.degenerate_element_count}"
         )
-        if mesh_warnings:
-            self.mesh_quality_summary_text += "\n" + "\n".join(str(item) for item in mesh_warnings)
         self.mesh_min_angle_value = f"{summary.min_angle:.3f}"
         self.mesh_degenerate_element_count = summary.degenerate_element_count
         self.sketchMeshChanged.emit()
@@ -2710,14 +2428,21 @@ class WorkbenchBridge(QObject):
             f"{row['id']} | {row['name']} | {row['material_id']} | t={row['thickness']:.6g}"
             for row in section_rows
         )
-        face_rows = (
-            get_part_face_material_rows(self.current_project, self.active_part_id)
-            if self.active_part_id
-            else []
-        )
+        face_rows = []
+        if self.active_part_id:
+            part = self.current_project.get_part_by_id(self.active_part_id)
+            if part is not None:
+                for face in part.geometry.faces:
+                    face_rows.append({
+                        "face_id": face.id,
+                        "material_id": self.active_part_material_id,
+                        "material_name": self.active_part_material_name,
+                        "material_color": self.active_part_material_color,
+                        "thickness": self.active_part_thickness,
+                        "source": "part",
+                    })
         self.face_material_rows_preview = "\n".join(
-            f"{row['face_id']} | {row['material_name'] or '未指定'} | "
-            f"t={float(row['thickness']):.6g} | {row['source']}"
+            f"{row['face_id']} | {row['material_name'] or '未指定'} | t={float(row['thickness']):.6g} | {row['source']}"
             for row in face_rows
         )
         self.active_part_face_material_json = json.dumps(face_rows, ensure_ascii=False)
@@ -2750,58 +2475,6 @@ class WorkbenchBridge(QObject):
             ensure_ascii=False,
         )
         self.projectChanged.emit()
-
-    def _definitions_for_active_part(
-        self,
-        part,
-    ) -> tuple[list[BoundaryConditionDefinition], list[LoadDefinition]]:
-        point_ids = {point.id for point in part.geometry.points}
-        edge_ids = {edge.id for edge in part.geometry.edges}
-        boundary_conditions = [
-            bc
-            for bc in self.current_project.boundary_conditions
-            if (bc.target_type == "geometry_point" and bc.target_id in point_ids)
-            or (bc.target_type == "geometry_edge" and bc.target_id in edge_ids)
-        ]
-        loads = [
-            load
-            for load in self.current_project.loads
-            if (load.target_type == "geometry_point" and load.target_id in point_ids)
-            or (load.target_type == "geometry_edge" and load.target_id in edge_ids)
-        ]
-        return boundary_conditions, loads
-
-    def _validate_part_material_assignments(self, part) -> str:
-        if part.section_id is None and any(not face.section_id for face in part.geometry.faces):
-            return "当前模型存在未分配材料的闭合面"
-        return ""
-
-    def _validate_target_mappings(
-        self,
-        mesh: MeshModel,
-        boundary_conditions: list[BoundaryConditionDefinition],
-        loads: list[LoadDefinition],
-    ) -> str:
-        for bc in boundary_conditions:
-            if bc.target_type == "geometry_point":
-                if not mesh.geometry_point_to_mesh_node_ids.get(bc.target_id):
-                    return f"约束点 {bc.target_id} 未映射到网格节点"
-            elif bc.target_type == "geometry_edge":
-                if not mesh.geometry_edge_to_mesh_node_ids.get(bc.target_id):
-                    return f"约束边 {bc.target_id} 未映射到网格节点"
-                if not mesh.geometry_edge_to_mesh_element_edges.get(bc.target_id):
-                    return f"约束边 {bc.target_id} 未映射到网格边"
-
-        for load in loads:
-            if load.target_type == "geometry_point":
-                if not mesh.geometry_point_to_mesh_node_ids.get(load.target_id):
-                    return f"载荷点 {load.target_id} 未映射到网格节点"
-            elif load.target_type == "geometry_edge":
-                if not mesh.geometry_edge_to_mesh_node_ids.get(load.target_id):
-                    return f"载荷边 {load.target_id} 未映射到网格节点"
-                if not mesh.geometry_edge_to_mesh_element_edges.get(load.target_id):
-                    return f"载荷边 {load.target_id} 未映射到网格边"
-        return ""
 
     def _default_step_id(self) -> str:
         if self.current_project is None:
