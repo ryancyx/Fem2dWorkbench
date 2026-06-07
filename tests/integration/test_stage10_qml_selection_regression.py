@@ -4,16 +4,31 @@ from pathlib import Path
 def test_stage10_qml_selection_regression():
     qml = Path("ui/qml/MainWorkbench.qml").read_text(encoding="utf-8")
 
-    expected_snippets = [
-        "selectedObjectType",
-        "selectedObjectName",
-        "selectedObjectDescription",
-        "lastPlateX",
-        "lastPlateY",
-        "lastPlateW",
-        "lastPlateH",
-        "function selectObject",
-        "function clearSelection",
+    required_snippets = [
+        "selectedGeometryType",
+        "selectedGeometryId",
+        "selectedFaceId",
+        "function clearViewportSelection",
+        "function handleViewportSelection",
+        "function handleModelingClick",
+        "function handleTargetSelectionClick",
+        "function handleResultQueryClick",
+        "function screenToModel",
+        "viewportScale",
+        "viewportOffsetX",
+        "viewportOffsetY",
+        "resultOverlayMode",
+        "hasQueryMarker",
+        "function drawMeshLayer",
+        "function drawBoundaryLayer",
+        "function drawLoadLayer",
+        "function drawResultLayer",
+    ]
+
+    for snippet in required_snippets:
+        assert snippet in qml
+
+    forbidden_snippets = [
         "function selectPart",
         "function selectSection",
         "function selectAssembly",
@@ -21,29 +36,10 @@ def test_stage10_qml_selection_regression():
         "function selectLoad",
         "function selectMesh",
         "function selectResult",
-        "selectBoundary()",
-        "selectLoad()",
-        "selectMesh()",
-        "selectPart()",
-        "选择：",
-        "当前选择",
-        "对象名称",
-        "对象说明",
-        "TreeItem",
-        "handleViewportSelection",
-        "MouseArea",
-        "onClicked",
-        "onPressed",
-        "onPositionChanged",
-        "onReleased",
-        "viewportScale",
-        "viewportOffsetX",
-        "viewportOffsetY",
-        "showMesh",
-        "showBoundary",
-        "showLoad",
-        "showResultOverlay",
+        "lastPlateX",
+        "lastPlateY",
+        "lastPlateW",
+        "lastPlateH",
     ]
-
-    for snippet in expected_snippets:
-        assert snippet in qml
+    for snippet in forbidden_snippets:
+        assert snippet not in qml

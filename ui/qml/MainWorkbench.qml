@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
@@ -8,143 +8,148 @@ ApplicationWindow {
     id: root
 
     width: 1460
-    height: 880
-    minimumWidth: 1320
+    height: 900
+    minimumWidth: 1280
     minimumHeight: 760
     visible: true
     title: "Fem2dWorkbench"
     color: "#EEF3F8"
 
-    property real modelWidth: 2.0
-    property real modelHeight: 1.0
-    property int meshNx: 4
-    property int meshNy: 2
-    property real youngModulus: 210000000000
-    property real poissonRatio: 0.3
-    property real thickness: 0.01
-    property real edgeQy: -1000.0
-    property string currentMode: "工程"
-    property int resultTabIndex: 0
+    property string currentMode: "建模与材料"
     property real viewportScale: 1.0
     property real viewportOffsetX: 0.0
     property real viewportOffsetY: 0.0
-    property string viewportTool: "选择"
-    property bool showGrid: true
-    property bool showMesh: false
-    property bool showBoundary: false
-    property bool showLoad: false
-    property bool showResultOverlay: false
     property real lastMouseX: 0.0
     property real lastMouseY: 0.0
     property bool isPanning: false
-    property string selectedObjectType: "无"
-    property string selectedObjectName: "未选择"
-    property string selectedObjectDescription: "请在视口或模型树中选择对象。"
-    property real lastPlateX: 0.0
-    property real lastPlateY: 0.0
-    property real lastPlateW: 0.0
-    property real lastPlateH: 0.0
-    property bool dragInstanceEnabled: true
-    property bool assemblyMoveMode: false
-    property bool isDraggingInstance: false
-    property real dragStartMouseX: 0.0
-    property real dragStartMouseY: 0.0
-    property real dragStartInstanceTx: 0.0
-    property real dragStartInstanceTy: 0.0
-    property bool isDraggingSketchPoint: false
+    property bool isDraggingPoint: false
     property real sketchOriginX: 0.0
     property real sketchOriginY: 0.0
-    property real sketchDrawHeight: 0.0
-    property real sketchDrawScale: 1.0
-    property real leftPanelWidth: 310
-    property real rightPanelWidth: 360
+    property real sketchDrawScale: 100.0
+    property real lastModelBoundsX: 0.0
+    property real lastModelBoundsY: 0.0
+    property real lastModelBoundsW: 0.0
+    property real lastModelBoundsH: 0.0
+    property real queryMarkerX: 0.0
+    property real queryMarkerY: 0.0
+    property bool hasQueryMarker: false
+    property string viewportHint: ""
+    property string selectedObjectType: "无"
+    property string selectedObjectName: "未选择"
+    property string selectedObjectDescription: "请在视口中点击点、边或闭合面。"
+    property string resultOverlayMode: "none"
+    property real leftPanelWidth: 300
+    property real rightPanelWidth: 380
+    property bool leftPanelVisible: true
+    property bool rightPanelVisible: true
+    property real defaultLeftPanelWidth: 300
+    property real defaultRightPanelWidth: 380
     property real minLeftPanelWidth: 240
-    property real minRightPanelWidth: 300
+    property real minRightPanelWidth: 320
     property real minCenterPanelWidth: 620
-    property real maxLeftPanelWidth: 460
+    property real maxLeftPanelWidth: 420
     property real maxRightPanelWidth: 520
     property real splitterWidth: 8
     property real resizeStartMouseX: 0.0
-    property real resizeStartLeftWidth: 310
-    property real resizeStartRightWidth: 360
-    property string viewportSelectionType: ""
-    property string viewportSelectionId: ""
-    property string viewportSelectionDescription: ""
-    property string viewportHint: ""
-    property string selectedSketchFaceId: ""
+    property real resizeStartLeftWidth: 300
+    property real resizeStartRightWidth: 380
 
-    // 阶段 10-13 静态回归兼容关键字（非可见 UI）：
-    // handleViewportSelection
-    // Math.abs
-    // 矩形零件
-    // 左边界固定
-    // 右边界均布载荷
-    // sketchFixedEdgeId
-    // sketchLoadEdgeId
-    // sketchLoadQx
-    // sketchLoadQy
-    // solveSketchProject
-    // bridge.solveSketchProject
-    // setSelectedSketchEdgeAsFixed
-    // setSelectedSketchEdgeAsLoad
-    // setSketchLoadValues
-    // clearSketchBoundaryLoadSelection
-    // 当前选中边
-    // 设为固定边
-    // 设为载荷边
-    // 清除边界/载荷设置
-    // 固定边 ID
-    // 载荷边 ID
-    // 草图求解
-    // 求解草图
-    // bridge.generateSketchMeshForActivePart
-    // bridge.clearSketchMesh
-    // 生成草图网格
-    // 清除草图网格
-    // 网格节点数
-    // 网格单元数
-    // 新增零件
-
-    function createOrUpdateProject() {
-        updateCurrentProjectFromParameters()
+    component PanelResizeHandle: Item {
+        // Drag resizing is intentionally disabled.
+        // Side panels are controlled by visible capsule toggle handles instead.
+        property bool resizeLeft: true
+        width: 0
+        visible: false
     }
 
-    function updateCurrentProjectFromParameters() {
-        bridge.updateCurrentProjectParameters(
-            modelWidth,
-            modelHeight,
-            youngModulus,
-            poissonRatio,
-            thickness,
-            edgeQy,
-            meshNx,
-            meshNy
-        )
-        viewport.requestPaint()
-    }
-
-    function solveProject() {
-        if (bridge.solveCurrentModel()) {
-            resultDialog.open()
+    function modelPoints() {
+        try {
+            return JSON.parse(bridge.modelPointsJson)
+        } catch (e) {
+            return []
         }
-        viewport.requestPaint()
     }
 
-    function exportProjectResults() {
-        bridge.exportResults("outputs/latest")
+    function modelEdges() {
+        try {
+            return JSON.parse(bridge.modelEdgesJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function modelFaces() {
+        try {
+            return JSON.parse(bridge.modelFacesJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function faceMaterialRows() {
+        try {
+            return JSON.parse(bridge.faceMaterialJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function meshNodes() {
+        try {
+            return JSON.parse(bridge.meshNodesJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function meshElements() {
+        try {
+            return JSON.parse(bridge.meshElementsJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function boundaryConditions() {
+        try {
+            return JSON.parse(bridge.boundaryConditionsJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function loads() {
+        try {
+            return JSON.parse(bridge.loadsJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function resultNodeRows() {
+        try {
+            return JSON.parse(bridge.nodeRowsJson)
+        } catch (e) {
+            return []
+        }
+    }
+
+    function resultElementRows() {
+        try {
+            return JSON.parse(bridge.elementRowsJson)
+        } catch (e) {
+            return []
+        }
     }
 
     function fileUrlToLocalPath(fileUrl) {
         var text = fileUrl.toString()
-
         if (text.indexOf("file:///") === 0) {
             return decodeURIComponent(text.substring(8))
         }
-
         if (text.indexOf("file://") === 0) {
             return decodeURIComponent(text.substring(7))
         }
-
         return decodeURIComponent(text)
     }
 
@@ -153,6 +158,14 @@ ApplicationWindow {
             return path
         }
         return path + ".f2dw.json"
+    }
+
+    function saveCurrentProjectWithDialogFallback() {
+        if (bridge.projectPath !== "") {
+            bridge.saveCurrentProject(bridge.projectPath)
+        } else {
+            saveProjectDialog.open()
+        }
     }
 
     function mouseXInWorkspace(item, mouseX, mouseY) {
@@ -168,23 +181,20 @@ ApplicationWindow {
         if (total <= 0) {
             return
         }
-
         var reserved = root.minCenterPanelWidth + root.splitterWidth * 2
         var maxSideTotal = Math.max(0, total - reserved)
         var left = Math.max(root.minLeftPanelWidth, Math.min(root.maxLeftPanelWidth, root.leftPanelWidth))
         var right = Math.max(root.minRightPanelWidth, Math.min(root.maxRightPanelWidth, root.rightPanelWidth))
-
         if (left + right > maxSideTotal) {
             var overflow = left + right - maxSideTotal
             if (right - root.minRightPanelWidth >= overflow) {
                 right -= overflow
             } else {
-                overflow -= (right - root.minRightPanelWidth)
+                overflow -= right - root.minRightPanelWidth
                 right = root.minRightPanelWidth
                 left = Math.max(root.minLeftPanelWidth, left - overflow)
             }
         }
-
         root.leftPanelWidth = left
         root.rightPanelWidth = right
     }
@@ -207,370 +217,35 @@ ApplicationWindow {
         )
     }
 
-    onWidthChanged: clampPanelWidths()
-    Component.onCompleted: clampPanelWidths()
+    function clearViewportSelection() {
+        selectedObjectType = "无"
+        selectedObjectName = "未选择"
+        selectedObjectDescription = "请在视口中点击点、边或闭合面。"
+    }
 
-    function saveCurrentProjectWithDialogFallback() {
-        if (bridge.projectPath !== "") {
-            bridge.saveCurrentProject(bridge.projectPath)
+    function clearBridgeSelectionIfNeeded() {
+        bridge.clearSelection()
+    }
+
+    function clearSelection() {
+        root.clearViewportSelection()
+        root.clearBridgeSelectionIfNeeded()
+        root.repaintViewport()
+    }
+
+    function syncSelectionSummary() {
+        if (bridge.selectedGeometryType === "") {
+            clearViewportSelection()
+            return
+        }
+        selectedObjectType = bridge.selectedGeometryType
+        selectedObjectName = bridge.selectedGeometryId
+        if (bridge.selectedGeometryType === "point") {
+            selectedObjectDescription = "当前选择的是几何点，可用于连边、移动或施加集中力/点约束。"
+        } else if (bridge.selectedGeometryType === "edge") {
+            selectedObjectDescription = "当前选择的是几何边，可用于施加边约束或均布载荷。"
         } else {
-            saveProjectDialog.open()
-        }
-    }
-
-    function syncParametersFromBridge() {
-        modelWidth = bridge.projectWidth
-        modelHeight = bridge.projectHeight
-        youngModulus = bridge.projectYoungModulus
-        poissonRatio = bridge.projectPoissonRatio
-        thickness = bridge.projectThickness
-        edgeQy = bridge.projectEdgeQy
-        meshNx = bridge.projectMeshNx
-        meshNy = bridge.projectMeshNy
-        viewport.requestPaint()
-    }
-
-    function parsePartIdFromOption(optionText) {
-        var text = String(optionText)
-        var idx = text.indexOf("|")
-        if (idx < 0) {
-            return text.trim()
-        }
-        return text.substring(0, idx).trim()
-    }
-
-    function parseMaterialIdFromOption(optionText) {
-        var text = String(optionText)
-        var idx = text.indexOf("|")
-        if (idx < 0) {
-            return text.trim()
-        }
-        return text.substring(0, idx).trim()
-    }
-
-    function partOptionIndex() {
-        for (var i = 0; i < bridge.partOptions.length; i++) {
-            if (parsePartIdFromOption(bridge.partOptions[i]) === bridge.activePartId) {
-                return i
-            }
-        }
-        return -1
-    }
-
-    function parseInstanceIdFromOption(optionText) {
-        var text = String(optionText)
-        var idx = text.indexOf("|")
-        if (idx < 0) {
-            return text.trim()
-        }
-        return text.substring(0, idx).trim()
-    }
-
-    function instanceOptionIndex() {
-        for (var i = 0; i < bridge.instanceOptions.length; i++) {
-            if (parseInstanceIdFromOption(bridge.instanceOptions[i]) === bridge.activeInstanceId) {
-                return i
-            }
-        }
-        return -1
-    }
-
-    function syncPartsFromBridge() {
-        root.selectedSketchFaceId = ""
-        if (selectedObjectType === "零件") {
-            selectedObjectName = bridge.activePartName === "" ? "未选择零件" : bridge.activePartName
-            selectedObjectDescription = "当前活动零件尺寸：" + modelWidth + " × " + modelHeight + "。"
-        }
-        viewport.requestPaint()
-    }
-
-    function syncInstancesFromBridge() {
-        root.selectedSketchFaceId = ""
-        if (selectedObjectType === "装配实例") {
-            selectedObjectName = bridge.activeInstanceName === "" ? "未选择实例" : bridge.activeInstanceName
-            selectedObjectDescription = "当前活动实例引用零件：" + bridge.activeInstancePartId
-                    + "，位置：(" + bridge.activeInstanceTx + ", " + bridge.activeInstanceTy + ")。"
-        }
-        viewport.requestPaint()
-    }
-
-    function syncSketchFromBridge() {
-        if (!bridge.sketchHasFace) {
-            root.selectedSketchFaceId = ""
-            if (root.viewportSelectionType === "face") {
-                root.setViewportSelection("", "", "")
-            }
-        }
-        viewport.requestPaint()
-    }
-
-    function sketchPoints() {
-        try {
-            return JSON.parse(bridge.sketchPointsJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function sketchEdges() {
-        try {
-            return JSON.parse(bridge.sketchEdgesJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function assemblyInstances() {
-        try {
-            return JSON.parse(bridge.assemblyInstancesJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function sketchPointMap() {
-        var map = {}
-        var points = sketchPoints()
-        for (var i = 0; i < points.length; i++) {
-            map[points[i].id] = points[i]
-        }
-        return map
-    }
-
-    function sketchScreenPointMap(px, py, plateH) {
-        var map = {}
-        var points = sketchPoints()
-        var scale = root.sketchDrawScale
-        for (var i = 0; i < points.length; i++) {
-            map[points[i].id] = {
-                x: root.sketchOriginX + points[i].x * scale,
-                y: root.sketchOriginY + root.sketchDrawHeight - points[i].y * scale
-            }
-        }
-        return map
-    }
-
-    function distancePointToSegment(px, py, ax, ay, bx, by) {
-        var dx = bx - ax
-        var dy = by - ay
-        var lengthSquared = dx * dx + dy * dy
-        if (lengthSquared <= 1e-9) {
-            var ddx = px - ax
-            var ddy = py - ay
-            return Math.sqrt(ddx * ddx + ddy * ddy)
-        }
-        var t = ((px - ax) * dx + (py - ay) * dy) / lengthSquared
-        t = Math.max(0, Math.min(1, t))
-        var cx = ax + t * dx
-        var cy = ay + t * dy
-        var ex = px - cx
-        var ey = py - cy
-        return Math.sqrt(ex * ex + ey * ey)
-    }
-
-    function findNearestSketchEdgeAt(mouseX, mouseY) {
-        if (bridge.sketchEdgeCount <= 0) {
-            return ""
-        }
-        var screenMap = sketchScreenPointMap(root.sketchOriginX, root.sketchOriginY, root.sketchDrawHeight)
-        var edges = sketchEdges()
-        var bestEdgeId = ""
-        var bestDistance = 1.0e9
-        for (var i = 0; i < edges.length; i++) {
-            var edge = edges[i]
-            var a = screenMap[edge.start_point_id]
-            var b = screenMap[edge.end_point_id]
-            if (!a || !b) {
-                continue
-            }
-            var distance = distancePointToSegment(mouseX, mouseY, a.x, a.y, b.x, b.y)
-            if (distance < 10 && distance < bestDistance) {
-                bestDistance = distance
-                bestEdgeId = edge.id
-            }
-        }
-        return bestEdgeId
-    }
-
-    function findNearestSketchPointAt(mouseX, mouseY) {
-        if (bridge.sketchPointCount <= 0) {
-            return ""
-        }
-        var screenMap = sketchScreenPointMap(root.sketchOriginX, root.sketchOriginY, root.sketchDrawHeight)
-        var points = sketchPoints()
-        var bestPointId = ""
-        var bestDistance = 1.0e9
-        for (var i = 0; i < points.length; i++) {
-            var p = screenMap[points[i].id]
-            if (!p) {
-                continue
-            }
-            var dx = mouseX - p.x
-            var dy = mouseY - p.y
-            var distance = Math.sqrt(dx * dx + dy * dy)
-            if (distance < 10 && distance < bestDistance) {
-                bestDistance = distance
-                bestPointId = points[i].id
-            }
-        }
-        return bestPointId
-    }
-
-    function orderedSketchFaceScreenPolygon() {
-        if (!bridge.sketchHasFace || bridge.sketchPointCount < 3 || bridge.sketchEdgeCount < 3) {
-            return []
-        }
-
-        var points = sketchPoints()
-        var edges = sketchEdges()
-        var screenMap = sketchScreenPointMap(root.sketchOriginX, root.sketchOriginY, root.sketchDrawHeight)
-        var adjacency = {}
-        for (var i = 0; i < edges.length; i++) {
-            var edge = edges[i]
-            if (!adjacency[edge.start_point_id]) {
-                adjacency[edge.start_point_id] = []
-            }
-            if (!adjacency[edge.end_point_id]) {
-                adjacency[edge.end_point_id] = []
-            }
-            adjacency[edge.start_point_id].push(edge.end_point_id)
-            adjacency[edge.end_point_id].push(edge.start_point_id)
-        }
-
-        var orderedIds = []
-        if (edges.length > 0) {
-            var startId = edges[0].start_point_id
-            var currentId = startId
-            var previousId = ""
-            var guard = 0
-            while (guard < points.length + 2) {
-                orderedIds.push(currentId)
-                var neighbors = adjacency[currentId] || []
-                var nextId = ""
-                for (var j = 0; j < neighbors.length; j++) {
-                    if (neighbors[j] !== previousId) {
-                        nextId = neighbors[j]
-                        break
-                    }
-                }
-                if (nextId === "" || nextId === startId) {
-                    break
-                }
-                previousId = currentId
-                currentId = nextId
-                guard += 1
-            }
-        }
-
-        if (orderedIds.length < 3) {
-            orderedIds = []
-            for (var p = 0; p < points.length; p++) {
-                orderedIds.push(points[p].id)
-            }
-        }
-
-        var polygon = []
-        for (var k = 0; k < orderedIds.length; k++) {
-            var screenPoint = screenMap[orderedIds[k]]
-            if (screenPoint) {
-                polygon.push({ "x": screenPoint.x, "y": screenPoint.y })
-            }
-        }
-        return polygon
-    }
-
-    function pointInPolygon(mouseX, mouseY, polygon) {
-        if (polygon.length < 3) {
-            return false
-        }
-        var inside = false
-        for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-            var xi = polygon[i].x
-            var yi = polygon[i].y
-            var xj = polygon[j].x
-            var yj = polygon[j].y
-            var intersects = ((yi > mouseY) !== (yj > mouseY))
-                    && (mouseX < (xj - xi) * (mouseY - yi) / Math.max(yj - yi, 1e-9) + xi)
-            if (intersects) {
-                inside = !inside
-            }
-        }
-        return inside
-    }
-
-    function findSketchFaceAt(mouseX, mouseY) {
-        if (!bridge.sketchHasFace) {
-            return ""
-        }
-        var polygon = orderedSketchFaceScreenPolygon()
-        if (polygon.length < 3) {
-            return ""
-        }
-        return pointInPolygon(mouseX, mouseY, polygon) ? "f1" : ""
-    }
-
-    function screenToSketch(mouseX, mouseY) {
-        return {
-            x: (mouseX - root.sketchOriginX) / Math.max(root.sketchDrawScale, 1.0e-9),
-            y: (root.sketchOriginY + root.sketchDrawHeight - mouseY) / Math.max(root.sketchDrawScale, 1.0e-9)
-        }
-    }
-
-    function boundaryConditions() {
-        try {
-            return JSON.parse(bridge.boundaryConditionsJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function loads() {
-        try {
-            return JSON.parse(bridge.loadsJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function edgeById(edgeId) {
-        var edges = sketchEdges()
-        for (var i = 0; i < edges.length; i++) {
-            if (edges[i].id === edgeId) {
-                return edges[i]
-            }
-        }
-        return null
-    }
-
-    function faceMaterialRows() {
-        try {
-            return JSON.parse(bridge.activePartFaceMaterialJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function faceMaterialColor(faceId) {
-        var rows = root.faceMaterialRows()
-        for (var i = 0; i < rows.length; i++) {
-            if (String(rows[i].face_id) === String(faceId) && rows[i].material_color) {
-                return rows[i].material_color
-            }
-        }
-        if (bridge.activePartMaterialColor !== "") {
-            return bridge.activePartMaterialColor
-        }
-        return "#8FB7D8"
-    }
-
-    function faceById(faceId) {
-        if (!bridge.sketchHasFace || faceId === "") {
-            return null
-        }
-        return {
-            id: faceId,
-            edgeCount: bridge.sketchEdgeCount,
-            pointCount: bridge.sketchPointCount
+            selectedObjectDescription = "当前选择的是闭合面，可用于材料与厚度分配。"
         }
     }
 
@@ -580,187 +255,117 @@ ApplicationWindow {
         }
     }
 
-    function clearTransientViewportStateForMode(mode) {
+    function switchMode(modeName) {
+        currentMode = modeName
+        resultOverlayMode = modeName === "求解结果" ? resultOverlayMode : "none"
+        bridge.clearSelection()
+        clearViewportSelection()
         viewportHint = ""
-        isDraggingSketchPoint = false
-        isDraggingInstance = false
-        isPanning = false
-        if (mode !== "零件" && bridge.edgeStartPointId !== "") {
-            bridge.clearEdgeStartPoint()
+        repaintViewport()
+    }
+
+    function faceRowsPreview() {
+        var rows = modelFaces()
+        var lines = []
+        for (var i = 0; i < rows.length; i++) {
+            lines.push(rows[i].id + " | " + rows[i].edge_ids.join(", "))
         }
+        return lines.join("\n")
     }
 
-    function shouldDrawMesh() {
-        return root.currentMode === "网格"
-            || root.currentMode === "边界"
-            || root.currentMode === "载荷"
-            || root.currentMode === "结果"
-            || root.showMesh
-    }
-
-    function shouldDrawBoundary() {
-        return root.currentMode === "边界"
-            || root.currentMode === "结果"
-            || root.showBoundary
-    }
-
-    function shouldDrawLoad() {
-        return root.currentMode === "载荷"
-            || root.currentMode === "结果"
-            || root.showLoad
-    }
-
-    function shouldDrawResult() {
-        return (root.currentMode === "结果" || root.showResultOverlay) && bridge.hasSolution
-    }
-
-    function clearViewportCanvas(ctx) {
-        var modelCanvas = viewport
-        ctx.save()
-        ctx.setTransform(1, 0, 0, 1, 0, 0)
-        ctx.clearRect(0, 0, modelCanvas.width, modelCanvas.height)
-        ctx.restore()
-    }
-
-    function drawViewportBackground(ctx) {
-        var modelCanvas = viewport
-        ctx.save()
-        ctx.setTransform(1, 0, 0, 1, 0, 0)
-        ctx.fillStyle = "#E4EBF3"
-        ctx.fillRect(0, 0, modelCanvas.width, modelCanvas.height)
-        ctx.restore()
-        root.drawBaseGrid(ctx)
-    }
-
-    function drawEmptyProjectHint(ctx, text) {
-        ctx.save()
-        ctx.fillStyle = "#475569"
-        ctx.font = "14px 'Microsoft YaHei UI'"
-        ctx.textAlign = "center"
-        ctx.fillText(text, viewport.width / 2, viewport.height / 2)
-        ctx.restore()
-    }
-
-    function drawBaseGrid(ctx) {
-        if (!root.showGrid) {
-            return
-        }
-        ctx.save()
-        ctx.strokeStyle = "#CBD5E1"
-        ctx.lineWidth = 1
-        var grid = 32
-        for (var gx = 0; gx <= viewport.width; gx += grid) {
-            ctx.beginPath()
-            ctx.moveTo(gx, 0)
-            ctx.lineTo(gx, viewport.height)
-            ctx.stroke()
-        }
-        for (var gy = 0; gy <= viewport.height; gy += grid) {
-            ctx.beginPath()
-            ctx.moveTo(0, gy)
-            ctx.lineTo(viewport.width, gy)
-            ctx.stroke()
-        }
-        ctx.restore()
-    }
-
-    function updateViewportGeometryFrame() {
-        var maxW = viewport.width * 0.60
-        var maxH = viewport.height * 0.52
-        var plateW = maxW
-        var plateH = plateW * root.modelHeight / Math.max(root.modelWidth, 0.0001)
-        if (plateH > maxH) {
-            plateH = maxH
-            plateW = plateH * root.modelWidth / Math.max(root.modelHeight, 0.0001)
-        }
-        plateW *= root.viewportScale
-        plateH *= root.viewportScale
-
-        var px = (viewport.width - plateW) / 2 + root.viewportOffsetX
-        var py = (viewport.height - plateH) / 2 + root.viewportOffsetY
-
-        root.lastPlateX = px
-        root.lastPlateY = py
-        root.lastPlateW = plateW
-        root.lastPlateH = plateH
-        root.sketchOriginX = px
-        root.sketchOriginY = py
-        root.sketchDrawHeight = plateH
-        root.sketchDrawScale = 120 * root.viewportScale
-    }
-
-    function drawBaseGeometry(ctx) {
-        root.updateViewportGeometryFrame()
-        if (root.currentMode === "装配" && bridge.instanceCount === 0) {
-            root.drawEmptyProjectHint(ctx, "暂无装配实例，请选择零件并创建实例")
-            return
-        }
-        if (root.currentMode === "装配") {
-            root.drawAssemblyGeometry(ctx)
-            return
-        }
-        if (!bridge.sketchHasFace && bridge.sketchPointCount > 0) {
-            root.drawEmptyProjectHint(ctx, "当前零件尚未生成闭合面")
-        }
-        if (bridge.sketchPointCount > 0) {
-            root.drawSketchGeometry(ctx)
-        }
-    }
-
-    function assemblyInstanceScreenPointMap(instanceRow) {
+    function pointMapFromRows(points) {
         var map = {}
-        var points = instanceRow.points || []
-        var offsetX = Number(instanceRow.tx || 0) * root.sketchDrawScale
-        var offsetY = Number(instanceRow.ty || 0) * root.sketchDrawScale
         for (var i = 0; i < points.length; i++) {
-            map[points[i].id] = {
-                x: root.sketchOriginX + points[i].x * root.sketchDrawScale + offsetX,
-                y: root.sketchOriginY + root.sketchDrawHeight - points[i].y * root.sketchDrawScale - offsetY
-            }
+            map[points[i].id] = points[i]
         }
         return map
     }
 
-    function assemblyFaceMaterialColor(instanceRow, faceId) {
-        var rows = instanceRow.face_materials || []
+    function edgeById(edgeId) {
+        var edges = modelEdges()
+        for (var i = 0; i < edges.length; i++) {
+            if (edges[i].id === edgeId) {
+                return edges[i]
+            }
+        }
+        return null
+    }
+
+    function materialFillColor(hexColor, alpha) {
+        var color = String(hexColor || "#8FB7D8")
+        if (color.length !== 7 || color.charAt(0) !== "#") {
+            color = "#8FB7D8"
+        }
+        var r = parseInt(color.substring(1, 3), 16)
+        var g = parseInt(color.substring(3, 5), 16)
+        var b = parseInt(color.substring(5, 7), 16)
+        return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")"
+    }
+
+    function scalarRange(values) {
+        if (values.length === 0) {
+            return { min: 0.0, max: 1.0 }
+        }
+        var minValue = values[0]
+        var maxValue = values[0]
+        for (var i = 1; i < values.length; i++) {
+            minValue = Math.min(minValue, values[i])
+            maxValue = Math.max(maxValue, values[i])
+        }
+        if (Math.abs(maxValue - minValue) <= 1e-12) {
+            maxValue = minValue + 1.0
+        }
+        return { min: minValue, max: maxValue }
+    }
+
+    function contourColor(value, minValue, maxValue, alpha) {
+        var t = (value - minValue) / Math.max(1e-12, maxValue - minValue)
+        t = Math.max(0.0, Math.min(1.0, t))
+        var r = Math.round(42 + 213 * t)
+        var g = Math.round(123 + 88 * (1.0 - Math.abs(t - 0.5) * 2.0))
+        var b = Math.round(235 - 180 * t)
+        return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")"
+    }
+
+    function faceMaterialColor(faceId) {
+        var rows = faceMaterialRows()
         for (var i = 0; i < rows.length; i++) {
             if (String(rows[i].face_id) === String(faceId) && rows[i].material_color) {
                 return rows[i].material_color
             }
         }
-        return "#8FB7D8"
+        return bridge.activePartMaterialColor === "" ? "#8FB7D8" : bridge.activePartMaterialColor
     }
 
-    function orderedFacePolygonFromRows(faceRow, pointMap, edgeRows) {
+    function orderedFacePolygon(faceRow, pointMap) {
         if (!faceRow || !faceRow.edge_ids || faceRow.edge_ids.length < 3) {
             return []
         }
+        var edges = modelEdges()
         var edgeMap = {}
         var adjacency = {}
-        for (var i = 0; i < edgeRows.length; i++) {
-            var edge = edgeRows[i]
-            edgeMap[edge.id] = edge
+        for (var i = 0; i < edges.length; i++) {
+            edgeMap[edges[i].id] = edges[i]
         }
         for (var j = 0; j < faceRow.edge_ids.length; j++) {
-            var faceEdge = edgeMap[faceRow.edge_ids[j]]
-            if (!faceEdge) {
+            var edge = edgeMap[faceRow.edge_ids[j]]
+            if (!edge) {
                 continue
             }
-            if (!adjacency[faceEdge.start_point_id]) {
-                adjacency[faceEdge.start_point_id] = []
+            if (!adjacency[edge.start_point_id]) {
+                adjacency[edge.start_point_id] = []
             }
-            if (!adjacency[faceEdge.end_point_id]) {
-                adjacency[faceEdge.end_point_id] = []
+            if (!adjacency[edge.end_point_id]) {
+                adjacency[edge.end_point_id] = []
             }
-            adjacency[faceEdge.start_point_id].push(faceEdge.end_point_id)
-            adjacency[faceEdge.end_point_id].push(faceEdge.start_point_id)
+            adjacency[edge.start_point_id].push(edge.end_point_id)
+            adjacency[edge.end_point_id].push(edge.start_point_id)
         }
-
-        var orderedIds = []
         var startEdge = edgeMap[faceRow.edge_ids[0]]
         if (!startEdge) {
             return []
         }
+        var orderedIds = []
         var startId = startEdge.start_point_id
         var currentId = startId
         var previousId = ""
@@ -782,7 +387,6 @@ ApplicationWindow {
             currentId = nextId
             guard += 1
         }
-
         var polygon = []
         for (var m = 0; m < orderedIds.length; m++) {
             if (pointMap[orderedIds[m]]) {
@@ -792,23 +396,190 @@ ApplicationWindow {
         return polygon
     }
 
-    function drawAssemblyGeometry(ctx) {
-        var rows = root.assemblyInstances()
-        for (var i = 0; i < rows.length; i++) {
-            root.drawAssemblyInstance(ctx, rows[i])
+    function pointInPolygon(x, y, polygon) {
+        var inside = false
+        for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            var xi = polygon[i].x
+            var yi = polygon[i].y
+            var xj = polygon[j].x
+            var yj = polygon[j].y
+            var intersect = ((yi > y) !== (yj > y))
+                    && (x < (xj - xi) * (y - yi) / Math.max(1.0e-9, yj - yi) + xi)
+            if (intersect) {
+                inside = !inside
+            }
+        }
+        return inside
+    }
+
+    function distancePointToSegment(px, py, ax, ay, bx, by) {
+        var dx = bx - ax
+        var dy = by - ay
+        var lengthSquared = dx * dx + dy * dy
+        if (lengthSquared <= 1.0e-9) {
+            var ddx = px - ax
+            var ddy = py - ay
+            return Math.sqrt(ddx * ddx + ddy * ddy)
+        }
+        var t = ((px - ax) * dx + (py - ay) * dy) / lengthSquared
+        t = Math.max(0.0, Math.min(1.0, t))
+        var cx = ax + t * dx
+        var cy = ay + t * dy
+        var ex = px - cx
+        var ey = py - cy
+        return Math.sqrt(ex * ex + ey * ey)
+    }
+
+    function updateViewportGeometryFrame() {
+        var points = modelPoints()
+        var minX = 0.0
+        var minY = 0.0
+        var maxX = 1.0
+        var maxY = 1.0
+        if (points.length > 0) {
+            minX = points[0].x
+            minY = points[0].y
+            maxX = points[0].x
+            maxY = points[0].y
+            for (var i = 1; i < points.length; i++) {
+                minX = Math.min(minX, points[i].x)
+                minY = Math.min(minY, points[i].y)
+                maxX = Math.max(maxX, points[i].x)
+                maxY = Math.max(maxY, points[i].y)
+            }
+        }
+        var modelW = Math.max(1.0, maxX - minX)
+        var modelH = Math.max(1.0, maxY - minY)
+        var maxDrawW = viewport.width * 0.68
+        var maxDrawH = viewport.height * 0.62
+        var drawScale = Math.min(maxDrawW / modelW, maxDrawH / modelH) * root.viewportScale
+        drawScale = Math.max(48.0, drawScale)
+        root.sketchDrawScale = drawScale
+        root.lastModelBoundsW = modelW * drawScale
+        root.lastModelBoundsH = modelH * drawScale
+        root.lastModelBoundsX = (viewport.width - root.lastModelBoundsW) / 2 + root.viewportOffsetX
+        root.lastModelBoundsY = (viewport.height - root.lastModelBoundsH) / 2 + root.viewportOffsetY
+        root.sketchOriginX = root.lastModelBoundsX - minX * drawScale
+        root.sketchOriginY = root.lastModelBoundsY + maxY * drawScale
+    }
+
+    function screenPoint(pointRow) {
+        return {
+            x: root.sketchOriginX + pointRow.x * root.sketchDrawScale,
+            y: root.sketchOriginY - pointRow.y * root.sketchDrawScale
         }
     }
 
-    function drawAssemblyInstance(ctx, instanceRow) {
-        var pointMap = root.assemblyInstanceScreenPointMap(instanceRow)
-        var points = instanceRow.points || []
-        var edges = instanceRow.edges || []
-        var faces = instanceRow.faces || []
-        var strokeColor = instanceRow.is_active ? "#2563EB" : "#64748B"
-        var lineWidth = instanceRow.is_active ? 2.6 : 1.8
+    function screenPointMap() {
+        var map = {}
+        var points = modelPoints()
+        for (var i = 0; i < points.length; i++) {
+            map[points[i].id] = root.screenPoint(points[i])
+        }
+        return map
+    }
+
+    function screenToModel(mouseX, mouseY) {
+        return {
+            x: (mouseX - root.sketchOriginX) / Math.max(root.sketchDrawScale, 1.0e-9),
+            y: (root.sketchOriginY - mouseY) / Math.max(root.sketchDrawScale, 1.0e-9)
+        }
+    }
+
+    function findNearestPointAt(mouseX, mouseY) {
+        var points = modelPoints()
+        var map = screenPointMap()
+        var bestId = ""
+        var bestDistance = 1.0e9
+        for (var i = 0; i < points.length; i++) {
+            var p = map[points[i].id]
+            if (!p) {
+                continue
+            }
+            var dx = mouseX - p.x
+            var dy = mouseY - p.y
+            var distance = Math.sqrt(dx * dx + dy * dy)
+            if (distance < 11 && distance < bestDistance) {
+                bestDistance = distance
+                bestId = points[i].id
+            }
+        }
+        return bestId
+    }
+
+    function findNearestEdgeAt(mouseX, mouseY) {
+        var edges = modelEdges()
+        var map = screenPointMap()
+        var bestId = ""
+        var bestDistance = 1.0e9
+        for (var i = 0; i < edges.length; i++) {
+            var a = map[edges[i].start_point_id]
+            var b = map[edges[i].end_point_id]
+            if (!a || !b) {
+                continue
+            }
+            var distance = distancePointToSegment(mouseX, mouseY, a.x, a.y, b.x, b.y)
+            if (distance < 10 && distance < bestDistance) {
+                bestDistance = distance
+                bestId = edges[i].id
+            }
+        }
+        return bestId
+    }
+
+    function findFaceAt(mouseX, mouseY) {
+        var faces = modelFaces()
+        var pointMap = screenPointMap()
+        for (var i = faces.length - 1; i >= 0; i--) {
+            var polygon = orderedFacePolygon(faces[i], pointMap)
+            if (polygon.length >= 3 && pointInPolygon(mouseX, mouseY, polygon)) {
+                return faces[i].id
+            }
+        }
+        return ""
+    }
+
+    function clearViewportCanvas(ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.clearRect(0, 0, viewport.width, viewport.height)
+    }
+
+    function drawViewportBackground(ctx) {
+        ctx.save()
+        ctx.fillStyle = "#E4EBF3"
+        ctx.fillRect(0, 0, viewport.width, viewport.height)
+        ctx.restore()
+    }
+
+    function drawBaseGrid(ctx) {
+        ctx.save()
+        ctx.strokeStyle = "#D6DFEA"
+        ctx.lineWidth = 1
+        var grid = 32
+        for (var gx = 0; gx <= viewport.width; gx += grid) {
+            ctx.beginPath()
+            ctx.moveTo(gx, 0)
+            ctx.lineTo(gx, viewport.height)
+            ctx.stroke()
+        }
+        for (var gy = 0; gy <= viewport.height; gy += grid) {
+            ctx.beginPath()
+            ctx.moveTo(0, gy)
+            ctx.lineTo(viewport.width, gy)
+            ctx.stroke()
+        }
+        ctx.restore()
+    }
+
+    function drawModelGeometry(ctx) {
+        root.updateViewportGeometryFrame()
+        var points = modelPoints()
+        var edges = modelEdges()
+        var faces = modelFaces()
+        var pointMap = screenPointMap()
 
         for (var fi = 0; fi < faces.length; fi++) {
-            var polygon = root.orderedFacePolygonFromRows(faces[fi], pointMap, edges)
+            var polygon = orderedFacePolygon(faces[fi], pointMap)
             if (polygon.length < 3) {
                 continue
             }
@@ -822,110 +593,35 @@ ApplicationWindow {
                 }
             }
             ctx.closePath()
-            ctx.fillStyle = root.materialFillColor(
-                root.assemblyFaceMaterialColor(instanceRow, faces[fi].id),
-                instanceRow.is_active ? 0.28 : 0.16
-            )
+            ctx.fillStyle = materialFillColor(faceMaterialColor(faces[fi].id), 0.22)
             ctx.fill()
             ctx.restore()
         }
 
         ctx.save()
+        ctx.strokeStyle = "#475569"
+        ctx.lineWidth = 2
         for (var ei = 0; ei < edges.length; ei++) {
-            var startPoint = pointMap[edges[ei].start_point_id]
-            var endPoint = pointMap[edges[ei].end_point_id]
-            if (!startPoint || !endPoint) {
-                continue
-            }
-            ctx.strokeStyle = strokeColor
-            ctx.lineWidth = lineWidth
-            ctx.beginPath()
-            ctx.moveTo(startPoint.x, startPoint.y)
-            ctx.lineTo(endPoint.x, endPoint.y)
-            ctx.stroke()
-        }
-        for (var pi = 0; pi < points.length; pi++) {
-            var screenPoint = pointMap[points[pi].id]
-            if (!screenPoint) {
+            var a = pointMap[edges[ei].start_point_id]
+            var b = pointMap[edges[ei].end_point_id]
+            if (!a || !b) {
                 continue
             }
             ctx.beginPath()
-            ctx.arc(screenPoint.x, screenPoint.y, instanceRow.is_active ? 4.5 : 3.5, 0, Math.PI * 2)
-            ctx.fillStyle = "#FFFFFF"
-            ctx.fill()
-            ctx.strokeStyle = strokeColor
-            ctx.lineWidth = 1.8
+            ctx.moveTo(a.x, a.y)
+            ctx.lineTo(b.x, b.y)
             ctx.stroke()
         }
         ctx.restore()
-    }
-
-    function drawSketchGeometry(ctx) {
-
-        var sketchPts = root.sketchPoints()
-        var sketchEdges = root.sketchEdges()
-        var pointMap = {}
-        var minSketchX = 999999
-        var minSketchY = 999999
-        var maxSketchX = -999999
-        var maxSketchY = -999999
-
-        for (var sp = 0; sp < sketchPts.length; sp++) {
-            var sketchPoint = sketchPts[sp]
-            var sx = root.sketchOriginX + sketchPoint.x * root.sketchDrawScale
-            var sy = root.sketchOriginY + root.sketchDrawHeight - sketchPoint.y * root.sketchDrawScale
-            pointMap[sketchPoint.id] = {"x": sx, "y": sy}
-            minSketchX = Math.min(minSketchX, sx)
-            minSketchY = Math.min(minSketchY, sy)
-            maxSketchX = Math.max(maxSketchX, sx)
-            maxSketchY = Math.max(maxSketchY, sy)
-        }
-
-        if (sketchPts.length > 0) {
-            root.lastPlateX = minSketchX - 12
-            root.lastPlateY = minSketchY - 12
-            root.lastPlateW = Math.max(24, maxSketchX - minSketchX + 24)
-            root.lastPlateH = Math.max(24, maxSketchY - minSketchY + 24)
-        }
-
-        if (bridge.sketchHasFace && sketchPts.length >= 3) {
-            var facePolygon = root.orderedSketchFaceScreenPolygon()
-            ctx.save()
-            ctx.beginPath()
-            for (var fp = 0; fp < facePolygon.length; fp++) {
-                var faceScreenPoint = facePolygon[fp]
-                if (fp === 0) {
-                    ctx.moveTo(faceScreenPoint.x, faceScreenPoint.y)
-                } else {
-                    ctx.lineTo(faceScreenPoint.x, faceScreenPoint.y)
-                }
-            }
-            ctx.closePath()
-            ctx.fillStyle = root.materialFillColor(root.faceMaterialColor("f1"), 0.22)
-            ctx.fill()
-            ctx.restore()
-        }
 
         ctx.save()
-        for (var se = 0; se < sketchEdges.length; se++) {
-            var sketchEdge = sketchEdges[se]
-            var startPoint = pointMap[sketchEdge.start_point_id]
-            var endPoint = pointMap[sketchEdge.end_point_id]
-            if (!startPoint || !endPoint) {
+        for (var pi = 0; pi < points.length; pi++) {
+            var p = pointMap[points[pi].id]
+            if (!p) {
                 continue
             }
-            ctx.strokeStyle = "#475569"
-            ctx.lineWidth = 2
             ctx.beginPath()
-            ctx.moveTo(startPoint.x, startPoint.y)
-            ctx.lineTo(endPoint.x, endPoint.y)
-            ctx.stroke()
-        }
-        for (var pp = 0; pp < sketchPts.length; pp++) {
-            var point = sketchPts[pp]
-            var screenPoint = pointMap[point.id]
-            ctx.beginPath()
-            ctx.arc(screenPoint.x, screenPoint.y, 5, 0, Math.PI * 2)
+            ctx.arc(p.x, p.y, 5, 0, Math.PI * 2)
             ctx.fillStyle = "#FFFFFF"
             ctx.fill()
             ctx.strokeStyle = "#1D4ED8"
@@ -933,125 +629,67 @@ ApplicationWindow {
             ctx.stroke()
             ctx.fillStyle = "#1F2937"
             ctx.font = "12px 'Microsoft YaHei UI'"
-            ctx.fillText(point.id, screenPoint.x + 8, screenPoint.y - 8)
+            ctx.fillText(points[pi].id, p.x + 8, p.y - 8)
         }
         ctx.restore()
     }
 
     function drawMeshLayer(ctx) {
-        if (!root.shouldDrawMesh()) {
+        if (!bridge.hasMesh) {
             return
         }
-        if (bridge.hasSketchMesh) {
-            var meshNodes = root.sketchMeshNodes()
-            var meshElements = root.sketchMeshElements()
-            var meshNodeMap = {}
-            for (var mn = 0; mn < meshNodes.length; mn++) {
-                var meshNode = meshNodes[mn]
-                meshNodeMap[meshNode.id] = {
-                    "x": root.sketchOriginX + meshNode.x * root.sketchDrawScale,
-                    "y": root.sketchOriginY + root.sketchDrawHeight - meshNode.y * root.sketchDrawScale
-                }
-            }
-            ctx.save()
-            ctx.strokeStyle = "#0F766E"
-            ctx.lineWidth = 1.3
-            for (var me = 0; me < meshElements.length; me++) {
-                var meshElement = meshElements[me]
-                var ids = meshElement.node_ids
-                if (ids.length === 3 && meshNodeMap[ids[0]] && meshNodeMap[ids[1]] && meshNodeMap[ids[2]]) {
-                    ctx.beginPath()
-                    ctx.moveTo(meshNodeMap[ids[0]].x, meshNodeMap[ids[0]].y)
-                    ctx.lineTo(meshNodeMap[ids[1]].x, meshNodeMap[ids[1]].y)
-                    ctx.lineTo(meshNodeMap[ids[2]].x, meshNodeMap[ids[2]].y)
-                    ctx.closePath()
-                    ctx.stroke()
-                }
-            }
-            ctx.restore()
-            return
-        }
-        if (bridge.sketchPointCount > 0) {
-            return
+        var nodeMap = {}
+        var nodes = meshNodes()
+        var elements = meshElements()
+        for (var i = 0; i < nodes.length; i++) {
+            nodeMap[nodes[i].id] = screenPoint(nodes[i])
         }
         ctx.save()
-        ctx.strokeStyle = "#7D8EA3"
-        ctx.lineWidth = 1
-        for (var i = 1; i < root.meshNx; i++) {
-            var x = root.lastPlateX + root.lastPlateW * i / root.meshNx
+        ctx.strokeStyle = "#0F766E"
+        ctx.lineWidth = 1.1
+        for (var j = 0; j < elements.length; j++) {
+            var ids = elements[j].node_ids
+            if (!nodeMap[ids[0]] || !nodeMap[ids[1]] || !nodeMap[ids[2]]) {
+                continue
+            }
             ctx.beginPath()
-            ctx.moveTo(x, root.lastPlateY)
-            ctx.lineTo(x, root.lastPlateY + root.lastPlateH)
-            ctx.stroke()
-        }
-        for (var j = 1; j < root.meshNy; j++) {
-            var y = root.lastPlateY + root.lastPlateH * j / root.meshNy
-            ctx.beginPath()
-            ctx.moveTo(root.lastPlateX, y)
-            ctx.lineTo(root.lastPlateX + root.lastPlateW, y)
+            ctx.moveTo(nodeMap[ids[0]].x, nodeMap[ids[0]].y)
+            ctx.lineTo(nodeMap[ids[1]].x, nodeMap[ids[1]].y)
+            ctx.lineTo(nodeMap[ids[2]].x, nodeMap[ids[2]].y)
+            ctx.closePath()
             ctx.stroke()
         }
         ctx.restore()
     }
 
     function drawBoundaryLayer(ctx) {
-        if (!root.shouldDrawBoundary()) {
-            return
-        }
-        var pointMap = root.sketchScreenPointMap(root.sketchOriginX, root.sketchOriginY, root.sketchDrawHeight)
-        var boundaryRows = root.boundaryConditions()
+        var pointMap = screenPointMap()
+        var rows = boundaryConditions()
         ctx.save()
         ctx.strokeStyle = "#B91C1C"
         ctx.fillStyle = "#B91C1C"
-        ctx.lineWidth = 4
-        for (var bcIndex = 0; bcIndex < boundaryRows.length; bcIndex++) {
-            var bc = boundaryRows[bcIndex]
-            if (bc.target_type === "geometry_edge") {
-                var bcEdge = root.edgeById(bc.target_id)
-                if (bcEdge && pointMap[bcEdge.start_point_id] && pointMap[bcEdge.end_point_id]) {
-                    ctx.beginPath()
-                    ctx.moveTo(pointMap[bcEdge.start_point_id].x, pointMap[bcEdge.start_point_id].y)
-                    ctx.lineTo(pointMap[bcEdge.end_point_id].x, pointMap[bcEdge.end_point_id].y)
-                    ctx.stroke()
-                }
-            } else if (bc.target_type === "geometry_point" && pointMap[bc.target_id]) {
-                var bcPoint = pointMap[bc.target_id]
+        ctx.lineWidth = 3
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].target_type === "geometry_point" && pointMap[rows[i].target_id]) {
+                var p = pointMap[rows[i].target_id]
                 ctx.beginPath()
-                ctx.arc(bcPoint.x, bcPoint.y, 7, 0, Math.PI * 2)
+                ctx.arc(p.x, p.y, 8, 0, Math.PI * 2)
                 ctx.stroke()
                 ctx.beginPath()
-                ctx.moveTo(bcPoint.x - 8, bcPoint.y - 8)
-                ctx.lineTo(bcPoint.x + 8, bcPoint.y + 8)
-                ctx.moveTo(bcPoint.x - 8, bcPoint.y + 8)
-                ctx.lineTo(bcPoint.x + 8, bcPoint.y - 8)
+                ctx.moveTo(p.x - 8, p.y - 8)
+                ctx.lineTo(p.x + 8, p.y + 8)
+                ctx.moveTo(p.x - 8, p.y + 8)
+                ctx.lineTo(p.x + 8, p.y - 8)
                 ctx.stroke()
-            }
-        }
-        ctx.restore()
-    }
-
-    function drawLoadLayer(ctx) {
-        if (!root.shouldDrawLoad()) {
-            return
-        }
-        var pointMap = root.sketchScreenPointMap(root.sketchOriginX, root.sketchOriginY, root.sketchDrawHeight)
-        var loadRows = root.loads()
-        ctx.save()
-        ctx.strokeStyle = "#D97706"
-        ctx.fillStyle = "#D97706"
-        ctx.lineWidth = 3.2
-        for (var loadIndex = 0; loadIndex < loadRows.length; loadIndex++) {
-            var load = loadRows[loadIndex]
-            if (load.target_type === "geometry_edge") {
-                var loadEdge = root.edgeById(load.target_id)
-                if (loadEdge && pointMap[loadEdge.start_point_id] && pointMap[loadEdge.end_point_id]) {
-                    var ls = pointMap[loadEdge.start_point_id]
-                    var le = pointMap[loadEdge.end_point_id]
-                    root.drawDistributedLoadOnEdge(ctx, ls, le, load.qx, load.qy)
+            } else if (rows[i].target_type === "geometry_edge") {
+                var edge = edgeById(rows[i].target_id)
+                if (!edge || !pointMap[edge.start_point_id] || !pointMap[edge.end_point_id]) {
+                    continue
                 }
-            } else if (load.target_type === "geometry_point" && pointMap[load.target_id]) {
-                var lp = pointMap[load.target_id]
-                root.drawArrowToTarget(ctx, lp.x, lp.y, load.qx, load.qy, 35)
+                ctx.beginPath()
+                ctx.moveTo(pointMap[edge.start_point_id].x, pointMap[edge.start_point_id].y)
+                ctx.lineTo(pointMap[edge.end_point_id].x, pointMap[edge.end_point_id].y)
+                ctx.stroke()
             }
         }
         ctx.restore()
@@ -1059,9 +697,9 @@ ApplicationWindow {
 
     function drawArrowToTarget(ctx, targetX, targetY, vectorX, vectorY, length) {
         var magnitude = Math.sqrt(vectorX * vectorX + vectorY * vectorY)
-        var dirX = 0
-        var dirY = 1
-        if (magnitude > 1e-9) {
+        var dirX = 0.0
+        var dirY = 1.0
+        if (magnitude > 1.0e-9) {
             dirX = vectorX / magnitude
             dirY = -vectorY / magnitude
         }
@@ -1094,8 +732,8 @@ ApplicationWindow {
         ctx.moveTo(startPoint.x, startPoint.y)
         ctx.lineTo(endPoint.x, endPoint.y)
         ctx.stroke()
-        for (var la = 0; la < 4; la++) {
-            var t = (la + 0.5) / 4.0
+        for (var i = 0; i < 4; i++) {
+            var t = (i + 0.5) / 4.0
             var headX = startPoint.x + (endPoint.x - startPoint.x) * t
             var headY = startPoint.y + (endPoint.y - startPoint.y) * t
             root.drawArrowToTarget(ctx, headX, headY, qx, qy, 28)
@@ -1103,3174 +741,1065 @@ ApplicationWindow {
     }
 
     function drawResultLayer(ctx) {
-        if (!root.shouldDrawResult()) {
+        if (!bridge.hasSolution || resultOverlayMode === "none") {
             return
         }
-        ctx.save()
-        if (bridge.sketchHasFace) {
-            var polygon = root.orderedSketchFaceScreenPolygon()
-            if (polygon.length >= 3) {
-                ctx.beginPath()
-                for (var i = 0; i < polygon.length; i++) {
-                    if (i === 0) {
-                        ctx.moveTo(polygon[i].x, polygon[i].y)
-                    } else {
-                        ctx.lineTo(polygon[i].x, polygon[i].y)
-                    }
-                }
-                ctx.closePath()
-                ctx.fillStyle = "rgba(37,99,235,0.10)"
-                ctx.fill()
-                ctx.strokeStyle = "#334155"
-                ctx.lineWidth = 2
-                ctx.stroke()
+        if (!bridge.hasMesh) {
+            return
+        }
+        var nodeMap = {}
+        var nodes = meshNodes()
+        var elements = meshElements()
+        var resultNodes = resultNodeRows()
+        var resultElements = resultElementRows()
+        var resultNodeMap = {}
+        var resultElementMap = {}
+        for (var i = 0; i < resultNodes.length; i++) {
+            resultNodeMap[resultNodes[i].node_id] = resultNodes[i]
+        }
+        for (var j = 0; j < resultElements.length; j++) {
+            resultElementMap[resultElements[j].element_id] = resultElements[j]
+        }
+        for (var n = 0; n < nodes.length; n++) {
+            nodeMap[nodes[n].id] = screenPoint(nodes[n])
+        }
+
+        if (resultOverlayMode === "vonMises") {
+            var values = []
+            for (var e = 0; e < resultElements.length; e++) {
+                values.push(resultElements[e].von_mises)
             }
-        } else {
-            var grad = ctx.createLinearGradient(root.lastPlateX, root.lastPlateY, root.lastPlateX + root.lastPlateW, root.lastPlateY + root.lastPlateH)
-            grad.addColorStop(0.0, "rgba(37,99,235,0.10)")
-            grad.addColorStop(0.55, "rgba(22,163,74,0.12)")
-            grad.addColorStop(1.0, "rgba(217,119,6,0.16)")
-            ctx.fillStyle = grad
-            ctx.fillRect(root.lastPlateX, root.lastPlateY, root.lastPlateW, root.lastPlateH)
-            ctx.strokeStyle = "#334155"
-            ctx.lineWidth = 2
-            ctx.strokeRect(root.lastPlateX, root.lastPlateY, root.lastPlateW, root.lastPlateH)
+            var range = scalarRange(values)
+            ctx.save()
+            for (var k = 0; k < elements.length; k++) {
+                var ids = elements[k].node_ids
+                var row = resultElementMap[elements[k].id]
+                if (!row || !nodeMap[ids[0]] || !nodeMap[ids[1]] || !nodeMap[ids[2]]) {
+                    continue
+                }
+                ctx.beginPath()
+                ctx.moveTo(nodeMap[ids[0]].x, nodeMap[ids[0]].y)
+                ctx.lineTo(nodeMap[ids[1]].x, nodeMap[ids[1]].y)
+                ctx.lineTo(nodeMap[ids[2]].x, nodeMap[ids[2]].y)
+                ctx.closePath()
+                ctx.fillStyle = contourColor(row.von_mises, range.min, range.max, 0.45)
+                ctx.fill()
+            }
+            ctx.restore()
+            return
+        }
+
+        ctx.save()
+        ctx.strokeStyle = "#7C3AED"
+        ctx.lineWidth = 1.2
+        var scaleFactor = 250.0
+        for (var m = 0; m < elements.length; m++) {
+            var nodeIds = elements[m].node_ids
+            var aRow = resultNodeMap[nodeIds[0]]
+            var bRow = resultNodeMap[nodeIds[1]]
+            var cRow = resultNodeMap[nodeIds[2]]
+            if (!aRow || !bRow || !cRow) {
+                continue
+            }
+            var a = screenPoint({ x: aRow.x + aRow.ux * scaleFactor, y: aRow.y + aRow.uy * scaleFactor })
+            var b = screenPoint({ x: bRow.x + bRow.ux * scaleFactor, y: bRow.y + bRow.uy * scaleFactor })
+            var c = screenPoint({ x: cRow.x + cRow.ux * scaleFactor, y: cRow.y + cRow.uy * scaleFactor })
+            ctx.beginPath()
+            ctx.moveTo(a.x, a.y)
+            ctx.lineTo(b.x, b.y)
+            ctx.lineTo(c.x, c.y)
+            ctx.closePath()
+            ctx.stroke()
         }
         ctx.restore()
     }
 
-    function drawSelectedSketchFace(ctx) {
-        if (root.selectedSketchFaceId === "" || !bridge.sketchHasFace) {
+    function drawQueryPointLayer(ctx) {
+        if (!hasQueryMarker) {
             return
         }
-
-        var polygon = root.orderedSketchFaceScreenPolygon()
-        if (polygon.length < 3) {
-            return
-        }
-
+        var p = screenPoint({ x: queryMarkerX, y: queryMarkerY })
         ctx.save()
+        ctx.strokeStyle = "#F59E0B"
+        ctx.fillStyle = "#F59E0B"
+        ctx.lineWidth = 2
         ctx.beginPath()
-        for (var i = 0; i < polygon.length; i++) {
-            if (i === 0) {
-                ctx.moveTo(polygon[i].x, polygon[i].y)
-            } else {
-                ctx.lineTo(polygon[i].x, polygon[i].y)
+        ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+    }
+
+    function drawLoadLayer(ctx) {
+        var pointMap = screenPointMap()
+        var rows = loads()
+        ctx.save()
+        ctx.strokeStyle = "#D97706"
+        ctx.fillStyle = "#D97706"
+        ctx.lineWidth = 3
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].target_type === "geometry_point" && pointMap[rows[i].target_id]) {
+                var p = pointMap[rows[i].target_id]
+                root.drawArrowToTarget(ctx, p.x, p.y, rows[i].qx, rows[i].qy, 35)
+            } else if (rows[i].target_type === "geometry_edge") {
+                var edge = edgeById(rows[i].target_id)
+                if (!edge || !pointMap[edge.start_point_id] || !pointMap[edge.end_point_id]) {
+                    continue
+                }
+                root.drawDistributedLoadOnEdge(
+                    ctx,
+                    pointMap[edge.start_point_id],
+                    pointMap[edge.end_point_id],
+                    rows[i].qx,
+                    rows[i].qy
+                )
             }
         }
-        ctx.closePath()
-        ctx.fillStyle = "rgba(37, 99, 235, 0.22)"
-        ctx.strokeStyle = "#2563EB"
-        ctx.lineWidth = 2.4
-        ctx.fill()
-        ctx.stroke()
         ctx.restore()
     }
 
     function drawSelectionLayer(ctx) {
-        var pointMap = root.sketchScreenPointMap(root.sketchOriginX, root.sketchOriginY, root.sketchDrawHeight)
-        var sketchEdges = root.sketchEdges()
+        var pointMap = screenPointMap()
         ctx.save()
-        root.drawSelectedSketchFace(ctx)
-        for (var se = 0; se < sketchEdges.length; se++) {
-            var sketchEdge = sketchEdges[se]
-            var startPoint = pointMap[sketchEdge.start_point_id]
-            var endPoint = pointMap[sketchEdge.end_point_id]
-            if (!startPoint || !endPoint) {
-                continue
+        if (bridge.selectedGeometryType === "face" && bridge.selectedFaceId !== "") {
+            var faces = modelFaces()
+            for (var i = 0; i < faces.length; i++) {
+                if (faces[i].id !== bridge.selectedFaceId) {
+                    continue
+                }
+                var polygon = orderedFacePolygon(faces[i], pointMap)
+                if (polygon.length < 3) {
+                    continue
+                }
+                ctx.beginPath()
+                for (var fp = 0; fp < polygon.length; fp++) {
+                    if (fp === 0) {
+                        ctx.moveTo(polygon[fp].x, polygon[fp].y)
+                    } else {
+                        ctx.lineTo(polygon[fp].x, polygon[fp].y)
+                    }
+                }
+                ctx.closePath()
+                ctx.fillStyle = "rgba(37, 99, 235, 0.22)"
+                ctx.strokeStyle = "#2563EB"
+                ctx.lineWidth = 2.4
+                ctx.fill()
+                ctx.stroke()
             }
-            if (bridge.selectedSketchEdgeId === sketchEdge.id || (bridge.selectedTargetType === "edge" && bridge.selectedTargetId === sketchEdge.id)) {
+        } else if (bridge.selectedGeometryType === "edge" && bridge.selectedGeometryId !== "") {
+            var edge = edgeById(bridge.selectedGeometryId)
+            if (edge && pointMap[edge.start_point_id] && pointMap[edge.end_point_id]) {
                 ctx.strokeStyle = "#2563EB"
                 ctx.lineWidth = 4
                 ctx.beginPath()
-                ctx.moveTo(startPoint.x, startPoint.y)
-                ctx.lineTo(endPoint.x, endPoint.y)
+                ctx.moveTo(pointMap[edge.start_point_id].x, pointMap[edge.start_point_id].y)
+                ctx.lineTo(pointMap[edge.end_point_id].x, pointMap[edge.end_point_id].y)
                 ctx.stroke()
             }
-        }
-        var sketchPts = root.sketchPoints()
-        for (var pp = 0; pp < sketchPts.length; pp++) {
-            var point = sketchPts[pp]
-            var screenPoint = pointMap[point.id]
-            if (!screenPoint) {
-                continue
-            }
-            if (bridge.selectedSketchPointId === point.id || (bridge.selectedTargetType === "point" && bridge.selectedTargetId === point.id)) {
+        } else if (bridge.selectedGeometryType === "point" && bridge.selectedGeometryId !== "") {
+            var point = pointMap[bridge.selectedGeometryId]
+            if (point) {
                 ctx.beginPath()
-                ctx.arc(screenPoint.x, screenPoint.y, 7, 0, Math.PI * 2)
+                ctx.arc(point.x, point.y, 7, 0, Math.PI * 2)
                 ctx.fillStyle = "#F59E0B"
                 ctx.fill()
                 ctx.strokeStyle = "#1D4ED8"
                 ctx.lineWidth = 2
                 ctx.stroke()
-            } else if (bridge.edgeStartPointId === point.id) {
-                ctx.beginPath()
-                ctx.arc(screenPoint.x, screenPoint.y, 7, 0, Math.PI * 2)
-                ctx.fillStyle = "#93C5FD"
-                ctx.fill()
-                ctx.strokeStyle = "#1D4ED8"
-                ctx.lineWidth = 2
-                ctx.stroke()
             }
         }
-
-        var visibleFlags = []
-        if (root.shouldDrawMesh()) visibleFlags.push("网格")
-        if (root.shouldDrawBoundary()) visibleFlags.push("约束")
-        if (root.shouldDrawLoad()) visibleFlags.push("载荷")
-        if (root.shouldDrawResult()) visibleFlags.push("结果")
-        if (bridge.hasSketchMesh) visibleFlags.push("二维网格")
-        if (visibleFlags.length === 0) visibleFlags.push("基础模型")
-
-        ctx.fillStyle = "#334155"
-        ctx.font = "13px 'Microsoft YaHei UI'"
-        ctx.fillText("视口 / " + root.currentMode, 18, 28)
-        ctx.fillStyle = "#64748B"
-        ctx.font = "12px 'Microsoft YaHei UI'"
-        ctx.fillText("缩放：" + Math.round(root.viewportScale * 100) + "%    工具：" + root.viewportTool, 18, 48)
-        ctx.fillText("显示：" + visibleFlags.join(" / "), 18, 68)
-        ctx.fillText("实例：" + (bridge.activeInstanceName === "" ? "—" : bridge.activeInstanceName)
-                     + "  位置：(" + bridge.activeInstanceTx.toFixed(2) + ", "
-                     + bridge.activeInstanceTy.toFixed(2) + ")", 18, 88)
         ctx.restore()
     }
 
-    function pointById(pointId) {
-        var points = sketchPoints()
-        for (var i = 0; i < points.length; i++) {
-            if (points[i].id === pointId) {
-                return points[i]
-            }
-        }
-        return null
-    }
-
-    function sketchMeshNodes() {
-        try {
-            return JSON.parse(bridge.sketchMeshNodesJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function sketchMeshElements() {
-        try {
-            return JSON.parse(bridge.sketchMeshElementsJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function resultNodeRows() {
-        try {
-            return JSON.parse(bridge.nodeRowsJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function resultElementRows() {
-        try {
-            return JSON.parse(bridge.elementRowsJson)
-        } catch (e) {
-            return []
-        }
-    }
-
-    function resultNodeRowMap() {
-        var map = {}
-        var rows = resultNodeRows()
-        for (var i = 0; i < rows.length; i++) {
-            map[rows[i].node_id] = rows[i]
-        }
-        return map
-    }
-
-    function resultElementRowMap() {
-        var map = {}
-        var rows = resultElementRows()
-        for (var i = 0; i < rows.length; i++) {
-            map[rows[i].element_id] = rows[i]
-        }
-        return map
-    }
-
-    function scalarRange(values) {
-        if (values.length === 0) {
-            return { min: 0.0, max: 1.0 }
-        }
-        var minValue = values[0]
-        var maxValue = values[0]
-        for (var i = 1; i < values.length; i++) {
-            minValue = Math.min(minValue, values[i])
-            maxValue = Math.max(maxValue, values[i])
-        }
-        if (Math.abs(maxValue - minValue) <= 1e-12) {
-            maxValue = minValue + 1.0
-        }
-        return { min: minValue, max: maxValue }
-    }
-
-    function contourColor(value, minValue, maxValue, alpha) {
-        var t = (value - minValue) / Math.max(1e-12, maxValue - minValue)
-        t = Math.max(0.0, Math.min(1.0, t))
-        var r = Math.round(42 + 213 * t)
-        var g = Math.round(123 + 88 * (1.0 - Math.abs(t - 0.5) * 2.0))
-        var b = Math.round(235 - 180 * t)
-        return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")"
-    }
-
-    function materialFillColor(hexColor, alpha) {
-        var color = String(hexColor || "#8FB7D8")
-        if (color.length !== 7 || color.charAt(0) !== "#") {
-            color = "#8FB7D8"
-        }
-        var r = parseInt(color.substring(1, 3), 16)
-        var g = parseInt(color.substring(3, 5), 16)
-        var b = parseInt(color.substring(5, 7), 16)
-        return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")"
-    }
-
-    function findNearestGeometryTargetAtCoordinates(x, y) {
-        var points = sketchPoints()
-        var edges = sketchEdges()
-        var pointMap = sketchPointMap()
-        var bestPointId = ""
-        var bestPointDistance = 1.0e9
-        var bestEdgeId = ""
-        var bestEdgeDistance = 1.0e9
-
-        for (var i = 0; i < points.length; i++) {
-            var dx = points[i].x - x
-            var dy = points[i].y - y
-            var pointDistance = Math.sqrt(dx * dx + dy * dy)
-            if (pointDistance < bestPointDistance) {
-                bestPointDistance = pointDistance
-                bestPointId = points[i].id
-            }
-        }
-
-        for (var j = 0; j < edges.length; j++) {
-            var edge = edges[j]
-            var a = pointMap[edge.start_point_id]
-            var b = pointMap[edge.end_point_id]
-            if (!a || !b) {
-                continue
-            }
-            var edgeDistance = distancePointToSegment(x, y, a.x, a.y, b.x, b.y)
-            if (edgeDistance < bestEdgeDistance) {
-                bestEdgeDistance = edgeDistance
-                bestEdgeId = edge.id
-            }
-        }
-
-        if (bestPointId === "" && bestEdgeId === "") {
-            return { targetType: "", targetId: "" }
-        }
-        if (bestPointId !== "" && (bestEdgeId === "" || bestPointDistance <= bestEdgeDistance)) {
-            return { targetType: "point", targetId: bestPointId }
-        }
-        return { targetType: "edge", targetId: bestEdgeId }
-    }
-
-    function selectNearestBoundaryTargetByCoordinates(x, y) {
-        var target = findNearestGeometryTargetAtCoordinates(x, y)
-        if (target.targetType === "point") {
-            bridge.selectGeometryPoint(target.targetId)
-            root.setViewportSelection("point", target.targetId, "边界目标：已按坐标吸附到最近几何点")
-        } else if (target.targetType === "edge") {
-            bridge.selectGeometryEdge(target.targetId)
-            root.setViewportSelection("edge", target.targetId, "边界目标：已按坐标吸附到最近几何边")
-        } else {
-            root.setViewportHint("未找到可用边界目标。")
-        }
-        root.repaintViewport()
-    }
-
-    function selectNearestLoadTargetByCoordinates(x, y) {
-        var target = findNearestGeometryTargetAtCoordinates(x, y)
-        if (target.targetType === "point") {
-            bridge.selectGeometryPoint(target.targetId)
-            root.setViewportSelection("point", target.targetId, "载荷目标：已按坐标吸附到最近几何点")
-        } else if (target.targetType === "edge") {
-            bridge.selectGeometryEdge(target.targetId)
-            root.setViewportSelection("edge", target.targetId, "载荷目标：已按坐标吸附到最近几何边")
-        } else {
-            root.setViewportHint("未找到可用载荷目标。")
-        }
-        root.repaintViewport()
-    }
-
-    function showResultPage() {
-        switchMode("结果")
-    }
-
-    function showExportPage() {
-        switchMode("导出")
-    }
-
-    function switchMode(modeName) {
-        currentMode = modeName
-        root.clearViewportSelection()
-        root.clearBridgeSelectionIfNeeded()
-        if (modeName === "边界") {
-            showMesh = true
-            showBoundary = true
-        } else if (modeName === "载荷") {
-            showMesh = true
-            showLoad = true
-        } else if (modeName === "网格") {
-            showMesh = true
-        } else if (modeName === "结果") {
-            showMesh = true
-            showBoundary = true
-            showLoad = true
-            showResultOverlay = true
-        }
-        root.clearTransientViewportStateForMode(modeName)
-        root.repaintViewport()
-    }
-
-    function setMode(modeName) {
-        switchMode(modeName)
-    }
-
-    function fitViewport() {
-        viewportScale = 1.0
-        viewportOffsetX = 0.0
-        viewportOffsetY = 0.0
-        viewport.requestPaint()
-    }
-
-    function setViewportTool(toolName) {
-        viewportTool = toolName
-    }
-
-    function toggleMeshDisplay() {
-        showMesh = !showMesh
-        viewport.requestPaint()
-    }
-
-    function toggleBoundaryDisplay() {
-        showBoundary = !showBoundary
-        viewport.requestPaint()
-    }
-
-    function toggleLoadDisplay() {
-        showLoad = !showLoad
-        viewport.requestPaint()
-    }
-
-    function toggleResultOverlay() {
-        showResultOverlay = !showResultOverlay
-        viewport.requestPaint()
-    }
-
-    function setViewportSelection(type, id, description) {
-        viewportSelectionType = type
-        viewportSelectionId = id
-        viewportSelectionDescription = description
-        if (type !== "face") {
-            root.selectedSketchFaceId = ""
-        }
-        selectedObjectType = type === "" ? "无" : (type === "face" ? "闭合面" : type)
-        selectedObjectName = id === "" ? "未选择" : id
-        selectedObjectDescription = description === "" ? "请在视口或模型树中选择对象。" : description
-    }
-
-    function setViewportHint(text) {
-        viewportHint = text
-    }
-
-    function selectObject(objectType, objectName, description) {
-        setViewportSelection(objectType, objectName, description)
-    }
-
-    function clearSelection() {
-        root.clearViewportSelection()
-        root.clearBridgeSelectionIfNeeded()
-        viewport.requestPaint()
-    }
-
-    function clearViewportSelection() {
-        root.selectedSketchFaceId = ""
-        root.viewportSelectionType = ""
-        root.viewportSelectionId = ""
-        root.viewportSelectionDescription = ""
-        root.selectedObjectType = "无"
-        root.selectedObjectName = "未选择"
-        root.selectedObjectDescription = "请在视口或模型树中选择对象。"
-    }
-
-    function clearBridgeSelectionIfNeeded() {
-        bridge.clearSelectionState()
-    }
-
-    function selectOnlyPoint(pointId, description) {
-        root.selectedSketchFaceId = ""
-        bridge.selectSketchPoint(pointId)
-        root.setViewportSelection("point", pointId, description)
-        root.repaintViewport()
-    }
-
-    function selectOnlyEdge(edgeId, description) {
-        root.selectedSketchFaceId = ""
-        bridge.selectSketchEdge(edgeId)
-        root.setViewportSelection("edge", edgeId, description)
-        root.repaintViewport()
-    }
-
-    function selectOnlyFace(faceId, description) {
-        bridge.selectSketchPoint("")
-        bridge.selectSketchEdge("")
-        bridge.selectGeometryFace(faceId)
-        root.selectedSketchFaceId = faceId
-        root.setViewportSelection("face", faceId, description)
-        root.repaintViewport()
-    }
-
-    function selectSketchFace(faceId) {
-        if (faceId === "") {
-            return false
-        }
-        // 保留 "face" 关键字，兼容旧的静态回归检查。
-        root.selectOnlyFace(
-            faceId,
-            "当前选择的是活动零件的闭合二维面，可在网格模块中生成高质量三角网格。"
-        )
-        return true
-    }
-
-    function selectPart() {
-        setViewportSelection(
-            "零件",
-            bridge.activePartName === "" ? "未选择零件" : bridge.activePartName,
-            "当前活动零件尺寸：" + modelWidth + " × " + modelHeight + "。"
-        )
-    }
-
-    function selectSection() {
-        selectObject(
-            "属性",
-            "钢材薄板属性",
-            "材料弹性模量、泊松比、厚度和平面应力设置。"
-        )
-    }
-
-    function selectAssembly() {
-        selectAssemblyInstance()
-    }
-
-    function selectAssemblyInstance() {
-        selectObject(
-            "装配实例",
-            bridge.activeInstanceName === "" ? "未选择实例" : bridge.activeInstanceName,
-            "当前活动实例引用零件：" + bridge.activeInstancePartId
-                    + "，位置：(" + bridge.activeInstanceTx + ", " + bridge.activeInstanceTy + ")。"
-        )
-    }
-
-    function selectBoundary() {
-        showBoundary = true
-        setViewportSelection(
-            "边界条件",
-            bridge.selectedTargetId === "" ? "未选择边界目标" : bridge.selectedTargetId,
-            bridge.selectedTargetType === "" ? "请在视口中点击几何点或几何边，作为当前边界目标。" : "当前边界目标已选定。"
-        )
-    }
-
-    function selectLoad() {
-        showLoad = true
-        setViewportSelection(
-            "载荷",
-            bridge.selectedTargetId === "" ? "未选择载荷目标" : bridge.selectedTargetId,
-            bridge.selectedTargetType === "" ? "请在视口中点击几何点或几何边，作为当前载荷目标。" : "当前载荷目标已选定。"
-        )
-    }
-
-    function selectMesh() {
-        showMesh = true
-        setViewportSelection(
-            "网格",
-            "结构化 CST 网格",
-            "网格划分：" + meshNx + " × " + meshNy + "，预计节点 " + estimatedNodes() + "，预计单元 " + estimatedElements() + "。"
-        )
-    }
-
-    function selectResult() {
-        showMesh = true
-        if (bridge.hasSolution) {
-            showResultOverlay = true
-        }
-        setViewportSelection(
-            "结果",
-            "求解结果",
-            bridge.hasSolution
-                ? "当前已有求解结果。最大位移：" + bridge.maxDisplacement + "，最大 Von Mises：" + bridge.maxVonMises + "。"
-                : "当前暂无求解结果，请先求解。"
-        )
-    }
-
-    function selectByMode(modeName) {
-        switchMode(modeName)
-        if (modeName === "工程") {
-            setViewportSelection("工程", "矩形板分析", "当前工程为参数化矩形板有限元分析。")
-        } else if (modeName === "零件") {
-            selectPart()
-        } else if (modeName === "属性") {
-            selectSection()
-        } else if (modeName === "装配") {
-            selectAssembly()
-        } else if (modeName === "边界") {
-            selectBoundary()
-        } else if (modeName === "载荷") {
-            selectLoad()
-        } else if (modeName === "网格") {
-            selectMesh()
-        } else if (modeName === "结果") {
-            selectResult()
-        }
-    }
-
-    function handleViewportClick(mouseX, mouseY) {
-        if (root.viewportTool === "平移") {
-            return
-        }
-        if (root.currentMode === "零件" && bridge.partEditMode) {
-            root.handlePartEditViewportClick(mouseX, mouseY)
-            return
-        }
-        if (root.currentMode === "边界") {
-            root.handleBoundaryViewportClick(mouseX, mouseY)
-            return
-        }
-        if (root.currentMode === "载荷") {
-            root.handleLoadViewportClick(mouseX, mouseY)
-            return
-        }
-        if (root.currentMode === "装配") {
-            root.handleAssemblyViewportClick(mouseX, mouseY)
-            return
-        }
-        root.handleReadonlyViewportPick(mouseX, mouseY)
-    }
-
-    function handleViewportSelection(mouseX, mouseY) {
-        root.handleViewportClick(mouseX, mouseY)
-    }
-
-    function handlePartEditViewportClick(mouseX, mouseY) {
-        var pointId = root.findNearestSketchPointAt(mouseX, mouseY)
-        var edgeId = root.findNearestSketchEdgeAt(mouseX, mouseY)
-        var faceId = root.findSketchFaceAt(mouseX, mouseY)
+    function handleModelingClick(mouseX, mouseY) {
+        var pointId = findNearestPointAt(mouseX, mouseY)
+        var edgeId = findNearestEdgeAt(mouseX, mouseY)
+        var faceId = findFaceAt(mouseX, mouseY)
+        var modelPos = screenToModel(mouseX, mouseY)
 
         if (bridge.partEditTool === "添加节点") {
-            var modelPos = root.screenToSketch(mouseX, mouseY)
-            bridge.addSketchPointFromViewport(modelPos.x, modelPos.y)
-            root.setViewportSelection("point", bridge.selectedSketchPointId, "新增节点")
-            root.setViewportHint("已在视口中新增节点。")
-            viewport.requestPaint()
+            bridge.addModelPointFromViewport(modelPos.x, modelPos.y)
+            viewportHint = "已新增点。"
+            repaintViewport()
             return
         }
 
         if (bridge.partEditTool === "连接边") {
             if (pointId === "") {
-                root.clearViewportSelection()
-                root.clearBridgeSelectionIfNeeded()
-                root.setViewportHint("请点击节点作为连边端点。")
-                root.repaintViewport()
-                return
-            }
-            if (bridge.edgeStartPointId === "") {
-                root.selectOnlyPoint(pointId, "连边起点")
+                bridge.clearSelection()
+                viewportHint = "请点击一个点作为连边端点。"
+            } else if (bridge.edgeStartPointId === "") {
+                bridge.selectGeometryPoint(pointId)
                 bridge.startEdgeFromSelectedPoint()
+                viewportHint = "已记录起点，请点击第二个点完成连边。"
             } else {
                 bridge.connectEdgeToPoint(pointId)
-                root.selectOnlyPoint(pointId, "连边终点")
+                bridge.selectGeometryPoint(pointId)
+                viewportHint = "已完成连边。"
             }
+            repaintViewport()
             return
         }
 
         if (bridge.partEditTool === "删除") {
             if (pointId !== "") {
-                root.selectOnlyPoint(pointId, "删除节点")
+                bridge.selectGeometryPoint(pointId)
                 bridge.deleteSelectedSketchEntity()
-                root.setViewportHint("已删除节点。")
+                viewportHint = "已删除点。"
             } else if (edgeId !== "") {
-                root.selectOnlyEdge(edgeId, "删除边")
+                bridge.selectGeometryEdge(edgeId)
                 bridge.deleteSelectedSketchEntity()
-                root.setViewportHint("已删除边。")
+                viewportHint = "已删除边。"
             } else {
-                root.clearViewportSelection()
-                root.clearBridgeSelectionIfNeeded()
-                root.setViewportHint("未命中可删除对象。")
+                bridge.clearSelection()
+                viewportHint = "未命中可删除对象。"
             }
-            root.repaintViewport()
+            repaintViewport()
             return
         }
 
-        if (bridge.partEditTool === "移动节点") {
-            if (pointId !== "") {
-                root.selectOnlyPoint(pointId, "准备移动节点")
-            } else {
-                root.clearViewportSelection()
-                root.clearBridgeSelectionIfNeeded()
-                root.setViewportHint("请先点中一个节点。")
-            }
-            root.repaintViewport()
-            return
-        }
-
-        if (pointId !== "") {
-            root.selectOnlyPoint(pointId, "节点")
-            return
-        }
-        if (edgeId !== "") {
-            root.selectOnlyEdge(edgeId, "边")
-            return
-        }
-        if (faceId !== "") {
-            root.selectSketchFace(faceId)
-            return
-        }
-
-        root.clearViewportSelection()
-        root.clearBridgeSelectionIfNeeded()
-        root.setViewportHint("未命中几何对象。")
-        root.repaintViewport()
-    }
-
-    function handleBoundaryViewportClick(mouseX, mouseY) {
-        var pointId = root.findNearestSketchPointAt(mouseX, mouseY)
-        var edgeId = root.findNearestSketchEdgeAt(mouseX, mouseY)
         if (pointId !== "") {
             bridge.selectGeometryPoint(pointId)
-            root.setViewportSelection("point", pointId, "边界目标：几何点")
-            root.repaintViewport()
-            return
-        }
-        if (edgeId !== "") {
+            viewportHint = "已选择点。"
+        } else if (edgeId !== "") {
             bridge.selectGeometryEdge(edgeId)
-            root.setViewportSelection("edge", edgeId, "边界目标：几何边")
-            root.repaintViewport()
-            return
-        }
-        root.clearViewportSelection()
-        root.clearBridgeSelectionIfNeeded()
-        root.setViewportHint("未选择边界目标，请点击点或边。")
-        root.repaintViewport()
-    }
-
-    function handleLoadViewportClick(mouseX, mouseY) {
-        var pointId = root.findNearestSketchPointAt(mouseX, mouseY)
-        var edgeId = root.findNearestSketchEdgeAt(mouseX, mouseY)
-        if (pointId !== "") {
-            bridge.selectGeometryPoint(pointId)
-            root.setViewportSelection("point", pointId, "载荷目标：几何点")
-            root.repaintViewport()
-            return
-        }
-        if (edgeId !== "") {
-            bridge.selectGeometryEdge(edgeId)
-            root.setViewportSelection("edge", edgeId, "载荷目标：几何边")
-            root.repaintViewport()
-            return
-        }
-        root.clearViewportSelection()
-        root.clearBridgeSelectionIfNeeded()
-        root.setViewportHint("未选择载荷目标，请点击点或边。")
-        root.repaintViewport()
-    }
-
-    function handleAssemblyViewportClick(mouseX, mouseY) {
-        var instances = root.assemblyInstances()
-        for (var i = instances.length - 1; i >= 0; i--) {
-            var pointMap = root.assemblyInstanceScreenPointMap(instances[i])
-            var points = instances[i].points || []
-            if (points.length === 0) {
-                continue
-            }
-            var minX = 1.0e9
-            var minY = 1.0e9
-            var maxX = -1.0e9
-            var maxY = -1.0e9
-            for (var j = 0; j < points.length; j++) {
-                var screenPoint = pointMap[points[j].id]
-                if (!screenPoint) {
-                    continue
-                }
-                minX = Math.min(minX, screenPoint.x)
-                minY = Math.min(minY, screenPoint.y)
-                maxX = Math.max(maxX, screenPoint.x)
-                maxY = Math.max(maxY, screenPoint.y)
-            }
-            if (mouseX >= minX - 8 && mouseX <= maxX + 8 && mouseY >= minY - 8 && mouseY <= maxY + 8) {
-                bridge.setActiveInstance(instances[i].id)
-                root.selectAssemblyInstance()
-                root.setViewportHint("已选中装配实例：" + instances[i].name)
-                root.repaintViewport()
-                return
-            }
-        }
-        if (bridge.instanceCount > 0) {
-            root.selectAssemblyInstance()
-            root.setViewportHint("未命中装配实例，当前保持活动实例高亮。")
+            viewportHint = "已选择边。"
+        } else if (faceId !== "") {
+            bridge.selectGeometryFace(faceId)
+            viewportHint = "已选择闭合面。"
         } else {
-            root.clearViewportSelection()
-            root.clearBridgeSelectionIfNeeded()
-            root.setViewportHint("未命中装配实例。")
+            bridge.clearSelection()
+            viewportHint = "已清空选择。"
         }
-        root.repaintViewport()
+        repaintViewport()
     }
 
-    function handleReadonlyViewportPick(mouseX, mouseY) {
-        var pointId = root.findNearestSketchPointAt(mouseX, mouseY)
-        var edgeId = root.findNearestSketchEdgeAt(mouseX, mouseY)
-        var faceId = root.findSketchFaceAt(mouseX, mouseY)
-        var modelPos = root.screenToSketch(mouseX, mouseY)
+    function handleTargetSelectionClick(mouseX, mouseY) {
+        var pointId = findNearestPointAt(mouseX, mouseY)
+        var edgeId = findNearestEdgeAt(mouseX, mouseY)
         if (pointId !== "") {
-            root.selectOnlyPoint(pointId, "节点")
-            if (root.currentMode === "结果" && bridge.hasSolution) {
-                bridge.queryResultAtPoint(modelPos.x, modelPos.y)
+            bridge.selectGeometryPoint(pointId)
+            viewportHint = "当前目标已切换为几何点。"
+        } else if (edgeId !== "") {
+            bridge.selectGeometryEdge(edgeId)
+            viewportHint = "当前目标已切换为几何边。"
+        } else {
+            bridge.clearSelection()
+            viewportHint = "面不能作为约束或载荷目标。"
+        }
+        repaintViewport()
+    }
+
+    function handleResultQueryClick(mouseX, mouseY) {
+        var modelPos = screenToModel(mouseX, mouseY)
+        queryMarkerX = modelPos.x
+        queryMarkerY = modelPos.y
+        hasQueryMarker = true
+        bridge.queryResultAtPoint(modelPos.x, modelPos.y)
+        viewportHint = "已按点击位置查询结果。"
+        repaintViewport()
+    }
+
+    function handleViewportClick(mouseX, mouseY) {
+        if (currentMode === "建模与材料") {
+            handleModelingClick(mouseX, mouseY)
+            return
+        }
+        if (currentMode === "约束与载荷") {
+            handleTargetSelectionClick(mouseX, mouseY)
+            return
+        }
+        if (currentMode === "求解结果" && bridge.hasSolution) {
+            handleResultQueryClick(mouseX, mouseY)
+            return
+        }
+        var pointId = findNearestPointAt(mouseX, mouseY)
+        var edgeId = findNearestEdgeAt(mouseX, mouseY)
+        var faceId = findFaceAt(mouseX, mouseY)
+        if (pointId !== "") {
+            bridge.selectGeometryPoint(pointId)
+        } else if (edgeId !== "") {
+            bridge.selectGeometryEdge(edgeId)
+        } else if (faceId !== "") {
+            bridge.selectGeometryFace(faceId)
+        } else {
+            bridge.clearSelection()
+        }
+        repaintViewport()
+    }
+
+    function handleViewportSelection(mouseX, mouseY) {
+        handleViewportClick(mouseX, mouseY)
+    }
+
+    function startPointDragIfNeeded(mouseX, mouseY) {
+        if (currentMode === "建模与材料" && bridge.partEditTool === "移动节点") {
+            var pointId = findNearestPointAt(mouseX, mouseY)
+            if (pointId !== "") {
+                bridge.selectGeometryPoint(pointId)
+                isDraggingPoint = true
             }
-            return
         }
-        if (edgeId !== "") {
-            root.selectOnlyEdge(edgeId, "边")
-            if (root.currentMode === "结果" && bridge.hasSolution) {
-                bridge.queryResultAtPoint(modelPos.x, modelPos.y)
-            }
-            return
-        }
-        if (faceId !== "") {
-            root.selectSketchFace(faceId)
-            if (root.currentMode === "结果" && bridge.hasSolution) {
-                bridge.queryResultAtPoint(modelPos.x, modelPos.y)
-            }
-            return
-        }
-        if (root.currentMode === "结果" && bridge.hasSolution) {
-            root.clearViewportSelection()
-            root.clearBridgeSelectionIfNeeded()
-            bridge.queryResultAtPoint(modelPos.x, modelPos.y)
-            root.setViewportHint("已按点击位置查询结果。")
-            root.repaintViewport()
-            return
-        }
-        root.clearViewportSelection()
-        root.clearBridgeSelectionIfNeeded()
-        root.setViewportHint("未命中对象。")
-        root.repaintViewport()
     }
 
-    function estimatedNodes() {
-        return (meshNx + 1) * (meshNy + 1)
+    function onProjectChanged() {
+        syncSelectionSummary()
+        repaintViewport()
     }
 
-    function estimatedElements() {
-        return 2 * meshNx * meshNy
+    function onSketchChanged() {
+        syncSelectionSummary()
+        repaintViewport()
     }
 
-    function openParameterDialog() {
-        widthField.text = String(modelWidth)
-        heightField.text = String(modelHeight)
-        eField.text = String(youngModulus)
-        nuField.text = String(poissonRatio)
-        thicknessField.text = String(thickness)
-        nxField.text = String(meshNx)
-        nyField.text = String(meshNy)
-        qyField.text = String(edgeQy)
-        parameterDialog.open()
+    function onSketchMeshChanged() {
+        repaintViewport()
     }
 
-    function applyParameters() {
-        var w = Number(widthField.text)
-        var h = Number(heightField.text)
-        var e = Number(eField.text)
-        var nu = Number(nuField.text)
-        var t = Number(thicknessField.text)
-        var nx = parseInt(nxField.text)
-        var ny = parseInt(nyField.text)
-        var qy = Number(qyField.text)
-
-        if (isNaN(w) || isNaN(h) || isNaN(e) || isNaN(nu)
-                || isNaN(t) || isNaN(nx) || isNaN(ny) || isNaN(qy)) {
-            console.log("参数输入无效")
-            return
-        }
-
-        modelWidth = w
-        modelHeight = h
-        youngModulus = e
-        poissonRatio = nu
-        thickness = t
-        meshNx = nx
-        meshNy = ny
-        edgeQy = qy
-        parameterDialog.close()
-        viewport.requestPaint()
+    function onResultChanged() {
+        repaintViewport()
     }
 
-    menuBar: MenuBar {
-        Menu {
-            title: "文件"
-            MenuItem { text: "新建工程"; onTriggered: { if (bridge.newProject()) root.syncParametersFromBridge() } }
-            MenuItem { text: "打开工程"; onTriggered: openProjectDialog.open() }
-            MenuItem { text: "保存工程"; onTriggered: root.saveCurrentProjectWithDialogFallback() }
-            MenuItem { text: "另存为"; onTriggered: saveProjectDialog.open() }
-            MenuSeparator {}
-            MenuItem { text: "退出"; onTriggered: Qt.quit() }
-        }
+    onWidthChanged: clampPanelWidths()
+    Component.onCompleted: {
+        clampPanelWidths()
+        bridge.newProject()
+        bridge.createEmptySketchForActivePart()
+        bridge.setModelTool("选择")
+        repaintViewport()
+    }
 
-        Menu {
-            title: "帮助"
-            MenuItem { text: "关于 Fem2dWorkbench"; onTriggered: aboutDialog.open() }
-        }
+    Connections {
+        target: bridge
+        function onProjectChanged() { root.onProjectChanged() }
+        function onSketchChanged() { root.onSketchChanged() }
+        function onSketchMeshChanged() { root.onSketchMeshChanged() }
+        function onResultChanged() { root.onResultChanged() }
+        function onPartEditChanged() { root.onSketchChanged() }
     }
 
     FileDialog {
         id: openProjectDialog
-
-        title: "打开工程文件"
+        title: "打开工程"
         fileMode: FileDialog.OpenFile
-        nameFilters: [
-            "Fem2dWorkbench 工程文件 (*.f2dw.json *.json)",
-            "所有文件 (*)"
-        ]
-
+        nameFilters: ["Fem2dWorkbench (*.f2dw.json *.json)"]
         onAccepted: {
-            var path = root.fileUrlToLocalPath(selectedFile)
-            if (bridge.loadProject(path)) {
-                root.syncParametersFromBridge()
-            }
+            bridge.loadProject(root.fileUrlToLocalPath(selectedFile))
+            root.resultOverlayMode = "none"
+            root.hasQueryMarker = false
+            root.repaintViewport()
         }
     }
 
     FileDialog {
         id: saveProjectDialog
-
-        title: "保存工程文件"
+        title: "保存工程"
         fileMode: FileDialog.SaveFile
-        defaultSuffix: "json"
-        nameFilters: [
-            "Fem2dWorkbench 工程文件 (*.f2dw.json *.json)",
-            "所有文件 (*)"
-        ]
-
-        onAccepted: {
-            var path = root.ensureProjectFileSuffix(root.fileUrlToLocalPath(selectedFile))
-            bridge.saveCurrentProject(path)
-        }
-    }
-
-    Connections {
-        target: bridge
-
-        function onProjectParametersChanged() {
-            root.syncParametersFromBridge()
-        }
-
-        function onProjectChanged() {
-            root.selectedSketchFaceId = ""
-            root.repaintViewport()
-        }
-
-        function onPartsChanged() {
-            root.syncPartsFromBridge()
-        }
-
-        function onInstancesChanged() {
-            root.syncInstancesFromBridge()
-        }
-
-        function onSketchChanged() {
-            root.syncSketchFromBridge()
-        }
-
-        function onSketchMeshChanged() {
-            viewport.requestPaint()
-        }
-
-        function onPartEditChanged() {
-            root.repaintViewport()
-        }
-
-        function onResultChanged() {
-            root.repaintViewport()
-        }
+        nameFilters: ["Fem2dWorkbench (*.f2dw.json)"]
+        onAccepted: bridge.saveCurrentProject(root.ensureProjectFileSuffix(root.fileUrlToLocalPath(selectedFile)))
     }
 
     Dialog {
         id: materialEditorDialog
         title: "材料编辑器"
         modal: true
-        standardButtons: Dialog.Close
-        width: 460
+        width: 540
         height: 520
+        standardButtons: Dialog.Ok
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
-            Label { text: "材料编辑器"; font.pixelSize: 16; font.bold: true }
-            TextArea {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 120
-                readOnly: true
-                text: bridge.materialRowsPreview
-                font.family: "Consolas"
-            }
-            TextField { id: dialogMaterialNameField; Layout.fillWidth: true; text: "steel"; placeholderText: "材料名称"; selectByMouse: true }
-            TextField { id: dialogMaterialEField; Layout.fillWidth: true; text: "210000000000"; placeholderText: "E"; selectByMouse: true }
-            TextField { id: dialogMaterialNuField; Layout.fillWidth: true; text: "0.3"; placeholderText: "ν"; selectByMouse: true }
-            TextField { id: dialogMaterialColorField; Layout.fillWidth: true; text: "#8FB7D8"; placeholderText: "颜色"; selectByMouse: true }
-            ComboBox { id: dialogMaterialCombo; Layout.fillWidth: true; model: bridge.materialOptions }
-            Flow {
-                Layout.fillWidth: true
-                spacing: 8
-                SecondaryButton { text: "新增材料"; buttonWidth: 88; onClicked: bridge.addMaterial(dialogMaterialNameField.text, Number(dialogMaterialEField.text), Number(dialogMaterialNuField.text), dialogMaterialColorField.text) }
-                SecondaryButton { text: "编辑材料"; buttonWidth: 88; onClicked: bridge.updateMaterial(root.parseMaterialIdFromOption(dialogMaterialCombo.currentText), dialogMaterialNameField.text, Number(dialogMaterialEField.text), Number(dialogMaterialNuField.text), dialogMaterialColorField.text) }
-                SecondaryButton { text: "删除材料"; buttonWidth: 88; onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(dialogMaterialCombo.currentText)) }
-            }
-        }
-    }
-
-    header: ColumnLayout {
-        spacing: 0
-
-        Rectangle {
-            Layout.fillWidth: true
-            height: 54
-            color: "#F8FAFC"
-            border.color: "#D3DCE8"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 16
-                anchors.rightMargin: 16
-                spacing: 14
-
-                Rectangle {
-                    width: 30
-                    height: 30
-                    radius: 8
-                    color: "#2563EB"
-
-                    Label {
-                        anchors.centerIn: parent
-                        text: "F"
-                        color: "#FFFFFF"
-                        font.pixelSize: 17
-                        font.bold: true
-                    }
-                }
-
-                ColumnLayout {
-                    spacing: 0
-
-                    Label {
-                        text: "Fem2dWorkbench"
-                        color: "#1F2937"
-                        font.pixelSize: 19
-                        font.bold: true
-                    }
-
-                    Label {
-                        text: "二维有限元工程工作台"
-                        color: "#64748B"
-                        font.pixelSize: 12
-                    }
-                }
-
-                Rectangle { width: 1; height: 26; color: "#D3DCE8" }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Label {
-                            text: "工程：" + (bridge.hasProject ? bridge.projectName : "未创建")
-                            color: "#1F2937"
-                            font.pixelSize: 13
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-
-                        Label {
-                            text: bridge.projectDirty ? "未保存" : "已保存"
-                            color: bridge.projectDirty ? "#B45309" : "#15803D"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        Item { Layout.fillWidth: true }
-                    }
-                }
-
-                SecondaryButton {
-                    text: "参数设置"
-                    buttonWidth: 92
-                    onClicked: root.openParameterDialog()
-                }
-
-                SecondaryButton {
-                    // 阶段 8 兼容说明：原“创建/更新工程”入口已收敛为顶部“更新工程”按钮。
-                    text: "更新工程"
-                    buttonWidth: 92
-                    onClicked: root.createOrUpdateProject()
-                }
-
-                PrimaryButton {
-                    text: "求解"
-                    buttonWidth: 92
-                    onClicked: root.solveProject()
-                }
-            }
-        }
-    }
-
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
-
-        RowLayout {
-            id: mainWorkspaceRow
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 0
-            onWidthChanged: root.clampPanelWidths()
-
-            Rectangle {
-                id: leftPanel
-                Layout.preferredWidth: root.leftPanelWidth
-                Layout.minimumWidth: root.minLeftPanelWidth
-                Layout.maximumWidth: root.maxLeftPanelWidth
-                Layout.fillHeight: true
-                color: "#F8FAFC"
-                border.color: "#D3DCE8"
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 58
-                        color: "#F8FAFC"
-                        border.color: "#D3DCE8"
-
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 14
-                            spacing: 2
-
-                            Label { text: "工程导航"; color: "#1F2937"; font.pixelSize: 16; font.bold: true }
-                            Label { text: "建模、分析与结果流程"; color: "#64748B"; font.pixelSize: 12 }
-                        }
-                    }
-
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-                        ColumnLayout {
-                            width: leftPanel.width
-                            spacing: 10
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 12
-                                Layout.rightMargin: 12
-                                Layout.topMargin: 12
-                                height: 428
-                                radius: 10
-                                color: "#FFFFFF"
-                                border.color: "#D3DCE8"
-
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 4
-
-                                    NavItem { indexText: "01"; title: "工程"; desc: "工程总览"; active: root.currentMode === "工程"; onClicked: root.selectByMode("工程") }
-                                    NavItem { indexText: "02"; title: "零件"; desc: "零件建模"; active: root.currentMode === "零件"; onClicked: root.selectByMode("零件") }
-                                    NavItem { indexText: "03"; title: "属性"; desc: "材料和厚度"; active: root.currentMode === "属性"; onClicked: root.selectByMode("属性") }
-                                    NavItem { indexText: "04"; title: "装配"; desc: "实例管理"; active: root.currentMode === "装配"; onClicked: root.selectByMode("装配") }
-                                    NavItem { indexText: "05"; title: "边界"; desc: "约束设置"; active: root.currentMode === "边界"; onClicked: root.selectByMode("边界") }
-                                    NavItem { indexText: "06"; title: "载荷"; desc: "载荷设置"; active: root.currentMode === "载荷"; onClicked: root.selectByMode("载荷") }
-                                    NavItem { indexText: "07"; title: "网格"; desc: "高质量三角网格"; active: root.currentMode === "网格"; onClicked: root.selectByMode("网格") }
-                                    NavItem { indexText: "08"; title: "结果"; desc: "结果浏览"; active: root.currentMode === "结果"; onClicked: root.selectByMode("结果") }
-                                    NavItem { indexText: "09"; title: "导出"; desc: "结果文件"; active: root.currentMode === "导出"; onClicked: root.selectByMode("导出") }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 12
-                                Layout.rightMargin: 12
-                                radius: 10
-                                color: "#FFFFFF"
-                                border.color: "#D3DCE8"
-                                implicitHeight: parameterColumn.implicitHeight + 24
-
-                                ColumnLayout {
-                                    id: parameterColumn
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 12
-                                    spacing: 8
-
-                                    Label { text: "当前参数"; color: "#1F2937"; font.pixelSize: 14; font.bold: true }
-                                    ParamRow { name: "活动零件"; value: bridge.activePartName === "" ? "—" : bridge.activePartName }
-                                    ParamRow { name: "零件数量"; value: String(bridge.partCount) }
-                                    ParamRow { name: "活动实例"; value: bridge.activeInstanceName === "" ? "—" : bridge.activeInstanceName }
-                                    ParamRow { name: "实例数量"; value: String(bridge.instanceCount) }
-                                    ParamRow { name: "矩形尺寸"; value: root.modelWidth + " × " + root.modelHeight }
-                                    ParamRow { name: "弹性模量"; value: String(root.youngModulus) }
-                                    ParamRow { name: "泊松比"; value: String(root.poissonRatio) }
-                                    ParamRow { name: "厚度"; value: String(root.thickness) }
-                                    ParamRow { name: "网格划分"; value: root.meshNx + " × " + root.meshNy }
-                                    ParamRow { name: "右边界载荷"; value: String(root.edgeQy) }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 12
-                                Layout.rightMargin: 12
-                                Layout.bottomMargin: 12
-                                radius: 10
-                                color: "#FFFFFF"
-                                border.color: "#D3DCE8"
-                                implicitHeight: treeColumn.implicitHeight + 24
-
-                                ColumnLayout {
-                                    id: treeColumn
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 12
-                                    spacing: 6
-
-                                    Label { text: "对象列表"; color: "#1F2937"; font.pixelSize: 14; font.bold: true }
-                                    TreeItem { text: "矩形板分析"; active: root.selectedObjectType === "工程"; onClicked: root.selectObject("工程", "矩形板分析", "当前工程为参数化矩形板有限元分析。") }
-                                    TreeItem { text: bridge.activePartName === "" ? "活动零件" : bridge.activePartName; active: root.selectedObjectType === "零件"; onClicked: root.selectPart() }
-                                    TreeItem { text: "钢材薄板属性"; active: root.selectedObjectType === "属性"; onClicked: root.selectSection() }
-                                    TreeItem { text: bridge.activeInstanceName === "" ? "活动实例" : bridge.activeInstanceName; active: root.selectedObjectType === "装配实例"; onClicked: root.selectAssemblyInstance() }
-                                    TreeItem { text: "边界目标"; active: root.currentMode === "边界" && bridge.selectedTargetType !== ""; onClicked: root.selectBoundary() }
-                                    TreeItem { text: "载荷目标"; active: root.currentMode === "载荷" && bridge.selectedTargetType !== ""; onClicked: root.selectLoad() }
-                                    TreeItem { text: "结构化 CST 网格"; active: root.selectedObjectType === "网格"; onClicked: root.selectMesh() }
-                                    TreeItem { text: "求解结果"; active: root.selectedObjectType === "结果"; onClicked: root.selectResult() }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            PanelResizeHandle {
-                id: leftPanelResizeHandle
-                Layout.preferredWidth: root.splitterWidth
-                Layout.fillHeight: true
-                onDragStarted: function(mouseX, mouseY) {
-                    root.resizeStartMouseX = root.mouseXInWorkspace(leftPanelResizeHandle, mouseX, mouseY)
-                    root.resizeStartLeftWidth = root.leftPanelWidth
-                }
-                onDragMoved: function(mouseX, mouseY) {
-                    var currentX = root.mouseXInWorkspace(leftPanelResizeHandle, mouseX, mouseY)
-                    root.resizeLeftPanelBy(currentX - root.resizeStartMouseX)
-                }
-                onDragFinished: root.clampPanelWidths()
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: root.minCenterPanelWidth
-                spacing: 0
-
-                Rectangle {
-                    id: viewportToolBarDock
-                    Layout.fillWidth: true
-                    height: 46
-                    color: "#F8FAFC"
-                    border.color: "#D3DCE8"
-
-                    RowLayout {
-                        id: toolbarRow
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 8
-
-                        Label {
-                            text: "视口工具"
-                            color: "#1F2937"
-                            font.pixelSize: 13
-                            font.bold: true
-                        }
-
-                        Rectangle { width: 1; height: 22; color: "#D3DCE8" }
-
-                        ViewToolButton { text: "适应窗口"; onClicked: root.fitViewport() }
-                        ViewToolButton { text: "选择"; active: root.viewportTool === "选择"; onClicked: root.setViewportTool("选择") }
-                        ViewToolButton { text: "平移"; active: root.viewportTool === "平移"; onClicked: root.setViewportTool("平移") }
-                        ViewToolButton { text: "网格"; active: root.showMesh; onClicked: root.toggleMeshDisplay() }
-                        ViewToolButton { text: "约束"; active: root.showBoundary; onClicked: root.toggleBoundaryDisplay() }
-                        ViewToolButton { text: "载荷"; active: root.showLoad; onClicked: root.toggleLoadDisplay() }
-                        ViewToolButton { text: "结果"; active: root.showResultOverlay; onClicked: root.toggleResultOverlay() }
-
-                        Item { Layout.fillWidth: true }
-
-                        Label {
-                            text: "工具：" + root.viewportTool
-                            color: "#64748B"
-                            font.pixelSize: 12
-                        }
-
-                        Label {
-                            text: "缩放：" + Math.round(root.viewportScale * 100) + "%"
-                            color: "#64748B"
-                            font.pixelSize: 12
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: viewportPanel
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: "#DCE6F0"
-                    border.color: "#C2CEDB"
-                    clip: true
-
-                    function requestPaint() {
-                        viewport.requestPaint()
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        radius: 10
-                        color: "#E4EBF3"
-                        border.color: "#B9C6D6"
-                        clip: true
-
-                        Canvas {
-                            id: viewport
-                            anchors.fill: parent
-                            onWidthChanged: root.repaintViewport()
-                            onHeightChanged: root.repaintViewport()
-
-                            onPaint: {
-                                var ctx = getContext("2d")
-                                root.clearViewportCanvas(ctx)
-                                root.drawViewportBackground(ctx)
-                                if (!bridge.hasProject) {
-                                    root.drawEmptyProjectHint(ctx, "请新建或打开工程")
-                                    return
-                                }
-                                if (bridge.partCount === 0) {
-                                    root.drawEmptyProjectHint(ctx, "空工程：请在零件模块进入编辑模式后新建二维零件")
-                                    return
-                                }
-                                root.drawBaseGeometry(ctx)
-                                if (root.shouldDrawMesh()) {
-                                    root.drawMeshLayer(ctx)
-                                }
-                                if (root.shouldDrawBoundary()) {
-                                    root.drawBoundaryLayer(ctx)
-                                }
-                                if (root.shouldDrawResult()) {
-                                    root.drawResultLayer(ctx)
-                                }
-                                root.drawSelectionLayer(ctx)
-                                if (root.shouldDrawLoad()) {
-                                    root.drawLoadLayer(ctx)
-                                }
-                            }
-
-                            Connections {
-                                target: root
-                                function onCurrentModeChanged() { root.repaintViewport() }
-                                function onModelWidthChanged() { root.repaintViewport() }
-                                function onModelHeightChanged() { root.repaintViewport() }
-                                function onMeshNxChanged() { root.repaintViewport() }
-                                function onMeshNyChanged() { root.repaintViewport() }
-                                function onViewportScaleChanged() { root.repaintViewport() }
-                                function onViewportOffsetXChanged() { root.repaintViewport() }
-                                function onViewportOffsetYChanged() { root.repaintViewport() }
-                                function onShowGridChanged() { root.repaintViewport() }
-                                function onShowMeshChanged() { root.repaintViewport() }
-                                function onShowBoundaryChanged() { root.repaintViewport() }
-                                function onShowLoadChanged() { root.repaintViewport() }
-                                function onShowResultOverlayChanged() { root.repaintViewport() }
-                            }
-                        }
-
-                        MouseArea {
-                            id: viewportMouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton
-                            cursorShape: root.viewportTool === "平移"
-                                         ? (root.isPanning ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
-                                         : Qt.ArrowCursor
-
-                            onWheel: function(wheel) {
-                                var factor = wheel.angleDelta.y > 0 ? 1.1 : 0.9
-                                root.viewportScale = Math.max(0.4, Math.min(4.0, root.viewportScale * factor))
-                                viewport.requestPaint()
-                                wheel.accepted = true
-                            }
-
-                            onPressed: function(mouse) {
-                                if (root.viewportTool === "平移") {
-                                    root.isPanning = true
-                                    root.lastMouseX = mouse.x
-                                    root.lastMouseY = mouse.y
-                                } else if (bridge.partEditMode
-                                           && bridge.partEditTool === "移动节点") {
-                                    var movePointId = root.findNearestSketchPointAt(mouse.x, mouse.y)
-                                    if (movePointId !== "") {
-                                        bridge.selectSketchPoint(movePointId)
-                                        root.setViewportSelection("point", movePointId, "准备移动节点")
-                                        root.isDraggingSketchPoint = true
-                                    } else {
-                                        root.handleViewportClick(mouse.x, mouse.y)
-                                    }
-                                } else if (root.dragInstanceEnabled
-                                           && root.assemblyMoveMode
-                                           && root.viewportTool === "选择"
-                                           && mouse.x >= root.lastPlateX
-                                           && mouse.x <= root.lastPlateX + root.lastPlateW
-                                           && mouse.y >= root.lastPlateY
-                                           && mouse.y <= root.lastPlateY + root.lastPlateH
-                                           && root.currentMode === "装配") {
-                                    if (bridge.instanceCount === 0 || bridge.activeInstanceId === "") {
-                                        root.setViewportHint("暂无装配实例，请选择零件并创建实例")
-                                        viewport.requestPaint()
-                                        return
-                                    }
-                                    root.isDraggingInstance = true
-                                    root.dragStartMouseX = mouse.x
-                                    root.dragStartMouseY = mouse.y
-                                    root.dragStartInstanceTx = bridge.activeInstanceTx
-                                    root.dragStartInstanceTy = bridge.activeInstanceTy
-                                    root.selectAssemblyInstance()
-                                } else {
-                                    console.log("视口选择坐标:", mouse.x, mouse.y)
-                                    root.handleViewportClick(mouse.x, mouse.y)
-                                }
-                            }
-
-                            onPositionChanged: function(mouse) {
-                                if (root.isDraggingSketchPoint && bridge.partEditMode && bridge.partEditTool === "移动节点") {
-                                    var moved = root.screenToSketch(mouse.x, mouse.y)
-                                    bridge.updateSelectedSketchPoint(moved.x, moved.y)
-                                    viewport.requestPaint()
-                                } else if (root.isDraggingInstance && root.viewportTool === "选择") {
-                                    var dx = (mouse.x - root.dragStartMouseX) / (80 * root.viewportScale)
-                                    var dy = -(mouse.y - root.dragStartMouseY) / (80 * root.viewportScale)
-                                    bridge.moveActiveInstance(root.dragStartInstanceTx + dx, root.dragStartInstanceTy + dy)
-                                    viewport.requestPaint()
-                                } else if (root.isPanning && root.viewportTool === "平移") {
-                                    root.viewportOffsetX += mouse.x - root.lastMouseX
-                                    root.viewportOffsetY += mouse.y - root.lastMouseY
-                                    root.lastMouseX = mouse.x
-                                    root.lastMouseY = mouse.y
-                                    viewport.requestPaint()
-                                }
-                            }
-
-                            onReleased: function(mouse) {
-                                root.isPanning = false
-                                root.isDraggingInstance = false
-                                root.isDraggingSketchPoint = false
-                            }
-
-                            onCanceled: {
-                                root.isPanning = false
-                                root.isDraggingInstance = false
-                                root.isDraggingSketchPoint = false
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 148
-                    radius: 10
-                    color: "#FFFFFF"
-                    border.color: "#D3DCE8"
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
-
-                        Label {
-                            text: "输出 / 状态日志"
-                            color: "#1F2937"
-                            font.pixelSize: 13
-                            font.bold: true
-                        }
-
-                        TextArea {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            readOnly: true
-                            text: bridge.statusText
-                            wrapMode: Text.WordWrap
-                            font.pixelSize: 12
-                            color: "#475569"
-                            background: Rectangle {
-                                color: "#F8FAFC"
-                                radius: 6
-                                border.color: "#D3DCE8"
-                            }
-                        }
-                    }
-                }
-            }
-
-            PanelResizeHandle {
-                id: rightPanelResizeHandle
-                Layout.preferredWidth: root.splitterWidth
-                Layout.fillHeight: true
-                onDragStarted: function(mouseX, mouseY) {
-                    root.resizeStartMouseX = root.mouseXInWorkspace(rightPanelResizeHandle, mouseX, mouseY)
-                    root.resizeStartRightWidth = root.rightPanelWidth
-                }
-                onDragMoved: function(mouseX, mouseY) {
-                    var currentX = root.mouseXInWorkspace(rightPanelResizeHandle, mouseX, mouseY)
-                    root.resizeRightPanelBy(currentX - root.resizeStartMouseX)
-                }
-                onDragFinished: root.clampPanelWidths()
-            }
-
-            Rectangle {
-                id: rightPanel
-                Layout.preferredWidth: root.rightPanelWidth
-                Layout.minimumWidth: root.minRightPanelWidth
-                Layout.maximumWidth: root.maxRightPanelWidth
-                Layout.fillHeight: true
-                color: "#F8FAFC"
-                border.color: "#D3DCE8"
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 58
-                        color: "#F8FAFC"
-                        border.color: "#D3DCE8"
-
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 14
-                            spacing: 2
-
-                            Label { text: "模块面板"; color: "#1F2937"; font.pixelSize: 16; font.bold: true }
-                            Label { text: "当前选择摘要 + 当前模块固定面板"; color: "#64748B"; font.pixelSize: 12 }
-                        }
-                    }
-
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-                        ColumnLayout {
-                            width: rightPanel.width
-                            spacing: 12
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 12
-                                Layout.rightMargin: 12
-                                Layout.topMargin: 12
-                                radius: 10
-                                color: "#FFFFFF"
-                                border.color: "#D3DCE8"
-                                implicitHeight: selectedColumn.implicitHeight + 24
-
-                                ColumnLayout {
-                                    id: selectedColumn
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 12
-                                    spacing: 8
-
-                                    Label { text: "当前选择"; color: "#1F2937"; font.pixelSize: 14; font.bold: true }
-                                    ParamRow { name: "当前模块"; value: root.currentMode }
-                                    ParamRow { name: "当前工具"; value: bridge.partEditMode ? bridge.partEditTool : root.viewportTool }
-                                    ParamRow { name: "选择类型"; value: root.selectedObjectType }
-                                    ParamRow { name: "对象名称"; value: root.selectedObjectName }
-
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: "对象说明"
-                                        color: "#64748B"
-                                        font.pixelSize: 12
-                                    }
-
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: root.selectedObjectDescription
-                                        color: "#1F2937"
-                                        font.pixelSize: 12
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    ParamRow { name: "提示"; value: root.viewportHint === "" ? "—" : root.viewportHint }
-
-                                    SecondaryButton {
-                                        text: "查看 / 编辑属性"
-                                        buttonWidth: 128
-                                        onClicked: objectPropertyDialog.open()
-                                    }
-
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 12
-                                Layout.rightMargin: 12
-                                radius: 10
-                                color: "#FFFFFF"
-                                border.color: "#D3DCE8"
-                                implicitHeight: detailColumn.implicitHeight + 24
-
-                                ColumnLayout {
-                                    id: detailColumn
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 12
-                                    spacing: 8
-
-                                    Label { text: "当前模块面板"; color: "#1F2937"; font.pixelSize: 14; font.bold: true }
-                                    ParamRow { name: "当前模块"; value: root.currentMode }
-                                    ParamRow { visible: root.currentMode === "工程"; name: "工程状态"; value: bridge.hasProject ? "已创建" : "未创建" }
-                                    ParamRow { visible: root.currentMode === "工程"; name: "活动零件"; value: bridge.activePartName === "" ? "未创建" : bridge.activePartName }
-                                    ParamRow { visible: root.currentMode === "零件"; name: "活动零件"; value: bridge.activePartName === "" ? "未创建" : bridge.activePartName }
-                                    ParamRow { visible: root.currentMode === "零件"; name: "零件数量"; value: String(bridge.partCount) }
-                                    ParamRow { visible: root.currentMode === "零件"; name: "宽度"; value: bridge.activePartId === "" ? "—" : String(root.modelWidth) }
-                                    ParamRow { visible: root.currentMode === "零件"; name: "高度"; value: bridge.activePartId === "" ? "—" : String(root.modelHeight) }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "工程"
-                                        Layout.fillWidth: true
-                                        implicitHeight: projectPanelColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: projectPanelColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "工程概览"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: bridge.partCount === 0
-                                                      ? "当前是空工程。请在零件模块进入编辑模式后新建二维零件，并逐步完成闭合面、材料、网格与求解。"
-                                                      : "当前工程已具备二维零件、材料、网格与求解工作流，可通过左侧模块逐步完善模型。"
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "零件"
-                                        Layout.fillWidth: true
-                                        implicitHeight: sketchEditColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: sketchEditColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "零件编辑"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            Label { text: "当前活动零件"; color: "#64748B"; font.pixelSize: 12 }
-                                            ComboBox {
-                                                id: activePartCombo
-                                                Layout.fillWidth: true
-                                                model: bridge.partOptions
-                                                currentIndex: root.partOptionIndex()
-                                                onActivated: function(index) {
-                                                    var partId = root.parsePartIdFromOption(activePartCombo.textAt(index))
-                                                    bridge.setActivePart(partId)
-                                                }
-                                            }
-                                            TextField {
-                                                id: partNameField
-                                                Layout.fillWidth: true
-                                                text: "新二维零件"
-                                                placeholderText: "新零件名称"
-                                                selectByMouse: true
-                                            }
-                                            SecondaryButton {
-                                                text: "新建二维零件"
-                                                buttonWidth: 104
-                                                onClicked: bridge.addEmptySketchPart(partNameField.text)
-                                            }
-                                            TextField {
-                                                id: renamePartField
-                                                Layout.fillWidth: true
-                                                text: bridge.activePartName
-                                                placeholderText: "活动零件新名称"
-                                                selectByMouse: true
-                                            }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton {
-                                                    text: "重命名"
-                                                    buttonWidth: 86
-                                                    onClicked: bridge.renameActivePart(renamePartField.text)
-                                                }
-                                                SecondaryButton {
-                                                    text: "删除活动零件"
-                                                    buttonWidth: 116
-                                                    onClicked: bridge.deleteActivePart()
-                                                }
-                                            }
-                                            SecondaryButton { text: "新建空零件面"; buttonWidth: 116; onClicked: bridge.createEmptySketchForActivePart() }
-                                            ParamRow { name: "编辑模式"; value: bridge.partEditMode ? "已启用" : "未启用" }
-                                            ParamRow { name: "当前工具"; value: bridge.partEditTool }
-                                            ParamRow { name: "点数 / 边数 / 面数"; value: bridge.sketchPointCount + " / " + bridge.sketchEdgeCount + " / " + bridge.sketchFaceCount }
-                                            ParamRow { name: "材料 / 厚度"; value: (bridge.activePartMaterialName === "" ? "未指定" : bridge.activePartMaterialName) + " / " + bridge.activePartThickness }
-                                            ParamRow { name: "网格状态"; value: bridge.currentMeshType === "none" ? "未生成" : bridge.sketchMeshStatusText }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton { text: "进入编辑模式"; buttonWidth: 104; onClicked: bridge.enterPartEditMode() }
-                                                SecondaryButton { text: "退出编辑模式"; buttonWidth: 104; onClicked: bridge.exitPartEditMode() }
-                                            }
-
-                                            Flow {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                visible: bridge.partEditMode
-                                                SecondaryButton { text: "选择"; buttonWidth: 72; onClicked: bridge.setPartEditTool("选择") }
-                                                SecondaryButton { text: "添加节点"; buttonWidth: 92; onClicked: bridge.setPartEditTool("添加节点") }
-                                                SecondaryButton { text: "连接边"; buttonWidth: 84; onClicked: bridge.setPartEditTool("连接边") }
-                                                SecondaryButton { text: "移动节点"; buttonWidth: 92; onClicked: bridge.setPartEditTool("移动节点") }
-                                                SecondaryButton { text: "删除"; buttonWidth: 72; onClicked: bridge.setPartEditTool("删除") }
-                                                SecondaryButton { text: "生成闭合面"; buttonWidth: 104; onClicked: bridge.buildSketchFace() }
-                                                SecondaryButton { text: "清空零件面"; buttonWidth: 96; onClicked: bridge.clearSketch() }
-                                            }
-
-                                            Label { text: "数据添加节点"; color: "#64748B"; font.pixelSize: 12 }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                TextField { id: pointXField; Layout.fillWidth: true; text: "0.0"; placeholderText: "x"; selectByMouse: true }
-                                                TextField { id: pointYField; Layout.fillWidth: true; text: "0.0"; placeholderText: "y"; selectByMouse: true }
-                                            }
-                                            SecondaryButton { text: "新增节点"; buttonWidth: 92; onClicked: bridge.addSketchPoint(Number(pointXField.text), Number(pointYField.text)) }
-
-                                            ParamRow { name: "当前选中节点"; value: bridge.selectedSketchPointId === "" ? "未选择" : bridge.selectedSketchPointId }
-                                            ParamRow { name: "当前选中边"; value: bridge.selectedSketchEdgeId === "" ? "未选择" : bridge.selectedSketchEdgeId }
-                                            ParamRow { name: "连边起点"; value: bridge.edgeStartPointId === "" ? "未设置" : bridge.edgeStartPointId }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton { text: "以选中点为起点"; buttonWidth: 124; onClicked: bridge.startEdgeFromSelectedPoint() }
-                                                SecondaryButton { text: "清除起点"; buttonWidth: 88; onClicked: bridge.clearEdgeStartPoint() }
-                                            }
-
-                                            Label { text: "高级连边输入"; color: "#64748B"; font.pixelSize: 12 }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                TextField { id: edgeStartField; Layout.fillWidth: true; text: "p1"; placeholderText: "起点 ID"; selectByMouse: true }
-                                                TextField { id: edgeEndField; Layout.fillWidth: true; text: "p2"; placeholderText: "终点 ID"; selectByMouse: true }
-                                            }
-                                            SecondaryButton { text: "连接边"; buttonWidth: 84; onClicked: bridge.addSketchEdge(edgeStartField.text, edgeEndField.text) }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton { text: "更新选中节点坐标"; buttonWidth: 132; onClicked: bridge.updateSelectedSketchPoint(Number(pointXField.text), Number(pointYField.text)) }
-                                                SecondaryButton { text: "删除选中实体"; buttonWidth: 116; onClicked: bridge.deleteSelectedSketchEntity() }
-                                            }
-
-                                            Label { text: "节点列表"; color: "#64748B"; font.pixelSize: 12 }
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 76
-                                                readOnly: true
-                                                text: bridge.sketchNodeRowsPreview
-                                                placeholderText: "节点列表"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                color: "#1F2937"
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-
-                                            Label { text: "边列表"; color: "#64748B"; font.pixelSize: 12 }
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 76
-                                                readOnly: true
-                                                text: bridge.sketchEdgeRowsPreview
-                                                placeholderText: "边列表"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                color: "#1F2937"
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "属性"
-                                        Layout.fillWidth: true
-                                        implicitHeight: materialColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: materialColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            // Legacy regression markers: 材料管理器 / 应用材料.
-                                            Label { text: "材料分配"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            ParamRow { name: "材料数量"; value: String(bridge.materialCount) }
-                                            ParamRow { name: "当前零件材料"; value: bridge.activePartMaterialName === "" ? "未指定" : bridge.activePartMaterialName }
-                                            ParamRow { name: "当前厚度"; value: String(bridge.activePartThickness) }
-                                            ParamRow { name: "当前闭合面"; value: root.selectedSketchFaceId === "" ? (bridge.sketchHasFace ? "已生成闭合面" : "未生成") : root.selectedSketchFaceId }
-                                            ParamRow { name: "应用目标"; value: bridge.activePartName === "" ? "未选择零件" : bridge.activePartName }
-                                            Label { text: "应用目标零件"; color: "#64748B"; font.pixelSize: 12 }
-                                            ComboBox {
-                                                id: materialTargetPartCombo
-                                                Layout.fillWidth: true
-                                                model: bridge.partOptions
-                                                currentIndex: root.partOptionIndex()
-                                                onActivated: function(index) {
-                                                    var partId = root.parsePartIdFromOption(materialTargetPartCombo.textAt(index))
-                                                    if (partId !== "") {
-                                                        bridge.setActivePart(partId)
-                                                        root.selectedSketchFaceId = ""
-                                                        root.clearViewportSelection()
-                                                        root.clearBridgeSelectionIfNeeded()
-                                                        root.repaintViewport()
-                                                    }
-                                                }
-                                            }
-                                            Label { text: "闭合面材料"; color: "#64748B"; font.pixelSize: 12 }
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 84
-                                                readOnly: true
-                                                text: bridge.faceMaterialRowsPreview
-                                                placeholderText: "闭合面材料"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-                                            TextField { id: thicknessAssignField; Layout.fillWidth: true; text: String(bridge.activePartThickness); placeholderText: "厚度"; selectByMouse: true }
-                                            ComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
-                                            Flow {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton { text: "打开材料编辑器"; buttonWidth: 132; onClicked: materialEditorDialog.open() }
-                                                SecondaryButton {
-                                                    text: "应用到闭合面"
-                                                    buttonWidth: 112
-                                                    onClicked: bridge.assignMaterialToSelectedFace(
-                                                        root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                        Number(thicknessAssignField.text)
-                                                    )
-                                                }
-                                                SecondaryButton {
-                                                    text: "应用到整个零件"
-                                                    buttonWidth: 128
-                                                    onClicked: bridge.assignMaterialToPart(
-                                                        root.parsePartIdFromOption(materialTargetPartCombo.currentText),
-                                                        root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                        Number(thicknessAssignField.text)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "网格"
-                                        Layout.fillWidth: true
-                                        implicitHeight: meshColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: meshColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "网格质量"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            TextField { id: meshTargetSizeField; Layout.fillWidth: true; text: String(bridge.meshTargetSize); placeholderText: "目标尺寸"; selectByMouse: true }
-                                            TextField { id: meshMaxAreaField; Layout.fillWidth: true; text: String(bridge.meshMaxArea); placeholderText: "最大单元面积"; selectByMouse: true }
-                                            TextField { id: meshMinAngleField; Layout.fillWidth: true; text: String(bridge.meshMinAngle); placeholderText: "最小角"; selectByMouse: true }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton {
-                                                    text: "生成网格"
-                                                    buttonWidth: 88
-                                                    onClicked: {
-                                                        if (!bridge.sketchHasFace) {
-                                                            root.setViewportHint("请先在零件模块生成闭合面，再生成网格")
-                                                            root.selectedSketchFaceId = ""
-                                                            root.selectedObjectType = "无"
-                                                            root.selectedObjectName = "未选择闭合面"
-                                                            root.selectedObjectDescription = "请先生成闭合面。生成网格将作用于当前活动零件的闭合二维面。"
-                                                            root.repaintViewport()
-                                                            return
-                                                        }
-
-                                                        bridge.generateQualityMeshForActivePart(
-                                                            Number(meshTargetSizeField.text),
-                                                            Number(meshMaxAreaField.text),
-                                                            Number(meshMinAngleField.text)
-                                                        )
-                                                    }
-                                                }
-                                                SecondaryButton { text: "清除网格"; buttonWidth: 88; onClicked: bridge.clearCurrentMesh() }
-                                            }
-                                            ParamRow { name: "网格类型"; value: bridge.currentMeshType }
-                                            ParamRow { name: "节点数"; value: String(bridge.sketchMeshNodeCount) }
-                                            ParamRow { name: "单元数"; value: String(bridge.sketchMeshElementCount) }
-                                            ParamRow { name: "最小角"; value: bridge.meshMinAngleValue === "" ? "—" : bridge.meshMinAngleValue }
-                                            ParamRow { name: "退化单元数量"; value: String(bridge.meshDegenerateElementCount) }
-                                            Label { text: "网格质量摘要"; color: "#64748B"; font.pixelSize: 12 }
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 96
-                                                readOnly: true
-                                                text: bridge.meshQualitySummaryText
-                                                placeholderText: "网格质量摘要"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "边界"
-                                        Layout.fillWidth: true
-                                        implicitHeight: boundaryColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: boundaryColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "边界条件"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            ParamRow { name: "当前目标"; value: bridge.selectedTargetType === "" ? "未选择" : bridge.selectedTargetType + " | " + bridge.selectedTargetId }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: bridge.selectedTargetType === "point"
-                                                      ? "当前目标是几何点，可添加点约束。"
-                                                      : bridge.selectedTargetType === "edge"
-                                                        ? "当前目标是几何边，可添加边约束。"
-                                                        : "请在视口中点击几何点或几何边，作为当前边界目标。"
-                                            }
-                                            Label { text: "按坐标吸附目标"; color: "#64748B"; font.pixelSize: 12 }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: "当前版本会按输入坐标吸附到最近几何点或几何边，再作为约束目标。"
-                                            }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                TextField { id: boundaryTargetXField; Layout.fillWidth: true; text: "0.0"; placeholderText: "目标 X"; selectByMouse: true }
-                                                TextField { id: boundaryTargetYField; Layout.fillWidth: true; text: "0.0"; placeholderText: "目标 Y"; selectByMouse: true }
-                                            }
-                                            SecondaryButton {
-                                                text: "按坐标选择目标"
-                                                buttonWidth: 120
-                                                onClicked: root.selectNearestBoundaryTargetByCoordinates(
-                                                    Number(boundaryTargetXField.text),
-                                                    Number(boundaryTargetYField.text)
-                                                )
-                                            }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                CheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }
-                                                CheckBox { id: uyFixedBox; text: "固定 Uy"; checked: true }
-                                            }
-                                            Flow {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton { text: "添加约束"; buttonWidth: 88; onClicked: bridge.addFixedConstraintToSelectedTarget(uxFixedBox.checked, uyFixedBox.checked) }
-                                                SecondaryButton {
-                                                    text: "删除约束"
-                                                    buttonWidth: 88
-                                                    onClicked: {
-                                                        var bcId = ""
-                                                        if (bridge.boundaryConditionRowsPreview !== "") {
-                                                            bcId = bridge.boundaryConditionRowsPreview.split(" | ")[0]
-                                                        }
-                                                        if (bcId !== "") {
-                                                            bridge.deleteBoundaryCondition(bcId)
-                                                        }
-                                                    }
-                                                }
-                                                SecondaryButton { text: "清除约束"; buttonWidth: 88; onClicked: bridge.clearConstraints() }
-                                            }
-                                            Label { text: "约束列表"; color: "#64748B"; font.pixelSize: 12 }
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 96
-                                                readOnly: true
-                                                text: bridge.boundaryConditionRowsPreview
-                                                placeholderText: "约束列表"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "载荷"
-                                        Layout.fillWidth: true
-                                        implicitHeight: loadColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: loadColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "载荷"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            ParamRow { name: "当前目标"; value: bridge.selectedTargetType === "" ? "未选择" : bridge.selectedTargetType + " | " + bridge.selectedTargetId }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: bridge.selectedTargetType === "point"
-                                                      ? "当前目标是几何点，可添加集中力。"
-                                                      : bridge.selectedTargetType === "edge"
-                                                        ? "当前目标是几何边，可添加边均布载荷。"
-                                                        : "请在视口中点击几何点或几何边，作为当前载荷目标。"
-                                            }
-                                            Label { text: "按坐标吸附目标"; color: "#64748B"; font.pixelSize: 12 }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: "当前版本会按输入坐标吸附到最近几何点或几何边，再作为载荷目标。"
-                                            }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                TextField { id: loadTargetXField; Layout.fillWidth: true; text: "0.0"; placeholderText: "目标 X"; selectByMouse: true }
-                                                TextField { id: loadTargetYField; Layout.fillWidth: true; text: "0.0"; placeholderText: "目标 Y"; selectByMouse: true }
-                                            }
-                                            SecondaryButton {
-                                                text: "按坐标选择目标"
-                                                buttonWidth: 120
-                                                onClicked: root.selectNearestLoadTargetByCoordinates(
-                                                    Number(loadTargetXField.text),
-                                                    Number(loadTargetYField.text)
-                                                )
-                                            }
-                                            ComboBox { id: loadTypeCombo; Layout.fillWidth: true; model: ["nodal_concentrated", "edge_uniform"] }
-                                            TextField { id: loadFxField; Layout.fillWidth: true; text: "0.0"; placeholderText: "Fx 或 qx"; selectByMouse: true }
-                                            TextField { id: loadFyField; Layout.fillWidth: true; text: "-1000.0"; placeholderText: "Fy 或 qy"; selectByMouse: true }
-                                            Flow {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                SecondaryButton { text: "添加载荷"; buttonWidth: 88; onClicked: bridge.addLoadToSelectedTarget(loadTypeCombo.currentText, Number(loadFxField.text), Number(loadFyField.text)) }
-                                                SecondaryButton {
-                                                    text: "删除载荷"
-                                                    buttonWidth: 88
-                                                    onClicked: {
-                                                        var loadId = ""
-                                                        if (bridge.loadRowsPreview !== "") {
-                                                            loadId = bridge.loadRowsPreview.split(" | ")[0]
-                                                        }
-                                                        if (loadId !== "") {
-                                                            bridge.deleteLoad(loadId)
-                                                        }
-                                                    }
-                                                }
-                                                SecondaryButton { text: "清除载荷"; buttonWidth: 88; onClicked: bridge.clearLoads() }
-                                            }
-                                            Label { text: "载荷列表"; color: "#64748B"; font.pixelSize: 12 }
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 96
-                                                readOnly: true
-                                                text: bridge.loadRowsPreview
-                                                placeholderText: "载荷列表"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "结果"
-                                        Layout.fillWidth: true
-                                        implicitHeight: resultColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: resultColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "结果查看"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            ParamRow { name: "状态"; value: bridge.hasSolution ? "已有结果" : "暂无结果" }
-                                            ParamRow { name: "节点数"; value: bridge.hasSolution ? String(bridge.nodeCount) : "—" }
-                                            ParamRow { name: "单元数"; value: bridge.hasSolution ? String(bridge.elementCount) : "—" }
-                                            ParamRow { name: "最大位移"; value: bridge.hasSolution ? bridge.maxDisplacement : "—" }
-                                            ParamRow { name: "最大 Von Mises"; value: bridge.hasSolution ? bridge.maxVonMises : "—" }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: "可在此查看摘要、打开变形图或 Von Mises 应力云图，并按坐标或视口点击查询任意点附近结果。"
-                                            }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                SecondaryButton {
-                                                    text: "显示变形图"
-                                                    buttonWidth: 96
-                                                    onClicked: deformationDialog.open()
-                                                }
-
-                                                SecondaryButton {
-                                                    text: "显示 Von Mises 应力云图"
-                                                    buttonWidth: 156
-                                                    onClicked: stressContourDialog.open()
-                                                }
-                                            }
-
-                                            Label { text: "任意点结果查询"; color: "#64748B"; font.pixelSize: 12 }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: "当前版本会按输入坐标或视口点击位置，吸附到最近节点并尝试定位所在三角形。"
-                                            }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                TextField {
-                                                    id: resultQueryXField
-                                                    Layout.fillWidth: true
-                                                    text: String(bridge.resultQueryX)
-                                                    placeholderText: "查询 X"
-                                                    selectByMouse: true
-                                                }
-
-                                                TextField {
-                                                    id: resultQueryYField
-                                                    Layout.fillWidth: true
-                                                    text: String(bridge.resultQueryY)
-                                                    placeholderText: "查询 Y"
-                                                    selectByMouse: true
-                                                }
-                                            }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                SecondaryButton {
-                                                    text: "查询结果"
-                                                    buttonWidth: 88
-                                                    onClicked: bridge.queryResultAtPoint(Number(resultQueryXField.text), Number(resultQueryYField.text))
-                                                }
-
-                                                SecondaryButton {
-                                                    text: "清除结果"
-                                                    buttonWidth: 88
-                                                    onClicked: bridge.clearResults()
-                                                }
-                                            }
-
-                                            TextArea {
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 160
-                                                readOnly: true
-                                                text: bridge.resultQueryText
-                                                placeholderText: "结果查询输出"
-                                                font.family: "Consolas"
-                                                font.pixelSize: 11
-                                                wrapMode: Text.WordWrap
-                                                background: Rectangle { color: "#FFFFFF"; radius: 6; border.color: "#D3DCE8" }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "导出"
-                                        Layout.fillWidth: true
-                                        implicitHeight: exportColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: exportColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label { text: "导出"; color: "#1F2937"; font.pixelSize: 13; font.bold: true }
-                                            ParamRow { name: "导出目录"; value: "outputs/latest" }
-                                            Label {
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                text: "导出当前结果到 outputs/latest，生成节点位移 CSV、单元结果 CSV 和摘要文本。"
-                                            }
-                                            PrimaryButton {
-                                                text: "导出结果"
-                                                buttonWidth: 96
-                                                onClicked: root.exportProjectResults()
-                                            }
-                                        }
-                                    }
-
-                                    ParamRow { visible: root.currentMode === "边界"; name: "当前目标"; value: bridge.selectedTargetType === "" ? "未选择" : bridge.selectedTargetType + " | " + bridge.selectedTargetId }
-                                    ParamRow { visible: root.currentMode === "载荷"; name: "当前目标"; value: bridge.selectedTargetType === "" ? "未选择" : bridge.selectedTargetType + " | " + bridge.selectedTargetId }
-                                    ParamRow { visible: root.currentMode === "网格"; name: "预计节点"; value: String(root.estimatedNodes()) }
-                                    ParamRow { visible: root.currentMode === "网格"; name: "预计单元"; value: String(root.estimatedElements()) }
-                                    ParamRow { visible: root.currentMode === "结果"; name: "是否已有结果"; value: bridge.hasSolution ? "是" : "否" }
-                                    ParamRow { visible: root.currentMode === "结果"; name: "最大位移"; value: bridge.hasSolution ? bridge.maxDisplacement : "—" }
-                                    ParamRow { visible: root.currentMode === "结果"; name: "最大 Von Mises"; value: bridge.hasSolution ? bridge.maxVonMises : "—" }
-                                    ParamRow { visible: root.currentMode === "装配"; name: "实例 ID"; value: bridge.activeInstanceId === "" ? "—" : bridge.activeInstanceId }
-                                    ParamRow { visible: root.currentMode === "装配"; name: "实例名称"; value: bridge.activeInstanceName === "" ? "—" : bridge.activeInstanceName }
-                                    ParamRow { visible: root.currentMode === "装配"; name: "引用零件"; value: bridge.activeInstancePartId === "" ? "—" : bridge.activeInstancePartId }
-                                    ParamRow { visible: root.currentMode === "装配"; name: "tx"; value: String(bridge.activeInstanceTx) }
-                                    ParamRow { visible: root.currentMode === "装配"; name: "ty"; value: String(bridge.activeInstanceTy) }
-                                    ParamRow { visible: root.currentMode === "装配"; name: "实例数量"; value: String(bridge.instanceCount) }
-
-                                    Rectangle {
-                                        visible: root.currentMode === "装配"
-                                        Layout.fillWidth: true
-                                        implicitHeight: instanceEditColumn.implicitHeight + 20
-                                        radius: 8
-                                        color: "#F8FAFC"
-                                        border.color: "#D3DCE8"
-
-                                        ColumnLayout {
-                                            id: instanceEditColumn
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            anchors.margins: 10
-                                            spacing: 8
-
-                                            Label {
-                                                text: "装配实例编辑"
-                                                color: "#1F2937"
-                                                font.pixelSize: 13
-                                                font.bold: true
-                                            }
-                                            Label {
-                                                visible: bridge.instanceCount === 0
-                                                text: "暂无装配实例，请选择零件并创建实例"
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            ComboBox {
-                                                id: activeInstanceCombo
-                                                Layout.fillWidth: true
-                                                model: bridge.instanceOptions
-                                                currentIndex: root.instanceOptionIndex()
-                                                onActivated: function(index) {
-                                                    var instanceId = root.parseInstanceIdFromOption(activeInstanceCombo.textAt(index))
-                                                    bridge.setActiveInstance(instanceId)
-                                                    root.repaintViewport()
-                                                }
-                                            }
-
-                                            Label { text: "新增实例"; color: "#64748B"; font.pixelSize: 12 }
-                                            ComboBox {
-                                                id: instancePartCombo
-                                                Layout.fillWidth: true
-                                                model: bridge.partOptions
-                                            }
-
-                                            TextField {
-                                                id: instanceNameField
-                                                Layout.fillWidth: true
-                                                text: "新实例"
-                                                placeholderText: "实例名称"
-                                                selectByMouse: true
-                                            }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                TextField {
-                                                    id: instanceTxField
-                                                    Layout.fillWidth: true
-                                                    text: "0.0"
-                                                    placeholderText: "tx"
-                                                    selectByMouse: true
-                                                }
-
-                                                TextField {
-                                                    id: instanceTyField
-                                                    Layout.fillWidth: true
-                                                    text: "0.0"
-                                                    placeholderText: "ty"
-                                                    selectByMouse: true
-                                                }
-                                            }
-
-                                            SecondaryButton {
-                                                text: "创建实例"
-                                                buttonWidth: 96
-                                                onClicked: {
-                                                    bridge.addInstanceForPart(
-                                                        root.parsePartIdFromOption(instancePartCombo.currentText),
-                                                        instanceNameField.text,
-                                                        Number(instanceTxField.text),
-                                                        Number(instanceTyField.text)
-                                                    )
-                                                    root.repaintViewport()
-                                                }
-                                            }
-
-                                            CheckBox {
-                                                text: "移动模式"
-                                                checked: root.assemblyMoveMode
-                                                onToggled: root.assemblyMoveMode = checked
-                                            }
-                                            Label { text: "移动活动实例"; color: "#64748B"; font.pixelSize: 12 }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                TextField {
-                                                    id: moveTxField
-                                                    Layout.fillWidth: true
-                                                    text: String(bridge.activeInstanceTx)
-                                                    placeholderText: "tx"
-                                                    selectByMouse: true
-                                                }
-
-                                                TextField {
-                                                    id: moveTyField
-                                                    Layout.fillWidth: true
-                                                    text: String(bridge.activeInstanceTy)
-                                                    placeholderText: "ty"
-                                                    selectByMouse: true
-                                                }
-                                            }
-
-                                            SecondaryButton {
-                                                text: "移动实例"
-                                                buttonWidth: 96
-                                                onClicked: {
-                                                    bridge.moveActiveInstance(Number(moveTxField.text), Number(moveTyField.text))
-                                                    root.repaintViewport()
-                                                }
-                                            }
-
-                                            Label { text: "参考点移动"; color: "#64748B"; font.pixelSize: 12 }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                TextField { id: referenceLocalXField; Layout.fillWidth: true; text: "0.0"; placeholderText: "local_x"; selectByMouse: true }
-                                                TextField { id: referenceLocalYField; Layout.fillWidth: true; text: "0.0"; placeholderText: "local_y"; selectByMouse: true }
-                                            }
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                TextField { id: referenceTargetXField; Layout.fillWidth: true; text: "0.0"; placeholderText: "target_x"; selectByMouse: true }
-                                                TextField { id: referenceTargetYField; Layout.fillWidth: true; text: "0.0"; placeholderText: "target_y"; selectByMouse: true }
-                                            }
-                                            SecondaryButton {
-                                                text: "移动参考点到坐标"
-                                                buttonWidth: 152
-                                                onClicked: {
-                                                    bridge.moveActiveInstanceReferencePointTo(
-                                                        Number(referenceLocalXField.text),
-                                                        Number(referenceLocalYField.text),
-                                                        Number(referenceTargetXField.text),
-                                                        Number(referenceTargetYField.text)
-                                                    )
-                                                    root.repaintViewport()
-                                                }
-                                            }
-
-                                            TextField {
-                                                id: renameInstanceField
-                                                Layout.fillWidth: true
-                                                text: bridge.activeInstanceName
-                                                placeholderText: "活动实例新名称"
-                                                selectByMouse: true
-                                            }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                SecondaryButton {
-                                                    text: "重命名实例"
-                                                    buttonWidth: 96
-                                                    onClicked: bridge.renameActiveInstance(renameInstanceField.text)
-                                                }
-
-                                                SecondaryButton {
-                                                    text: "删除活动实例"
-                                                    buttonWidth: 116
-                                                    onClicked: {
-                                                        bridge.deleteActiveInstance()
-                                                        root.repaintViewport()
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 12
-                                Layout.rightMargin: 12
-                                radius: 10
-                                color: "#FFFFFF"
-                                border.color: "#D3DCE8"
-                                implicitHeight: summaryColumn.implicitHeight + 24
-
-                                ColumnLayout {
-                                    id: summaryColumn
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 12
-                                    spacing: 8
-
-                                    Label { text: "结果摘要"; color: "#1F2937"; font.pixelSize: 14; font.bold: true }
-                                    ParamRow { name: "节点数"; value: bridge.hasSolution ? String(bridge.nodeCount) : "—" }
-                                    ParamRow { name: "单元数"; value: bridge.hasSolution ? String(bridge.elementCount) : "—" }
-                                    ParamRow { name: "最大位移"; value: bridge.hasSolution ? bridge.maxDisplacement : "—" }
-                                    ParamRow { name: "最大位移节点"; value: bridge.hasSolution ? bridge.maxDisplacementNodeId : "—" }
-                                    ParamRow { name: "最大 Von Mises"; value: bridge.hasSolution ? bridge.maxVonMises : "—" }
-                                    ParamRow { name: "最大应力单元"; value: bridge.hasSolution ? bridge.maxVonMisesElementId : "—" }
-                                    ParamRow { name: "警告数量"; value: bridge.hasSolution ? String(bridge.warningCount) : "—" }
-                                }
-                            }
-
-                        }
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            height: 30
-            color: "#F8FAFC"
-            border.color: "#D3DCE8"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 12
-
-                Label {
-                    text: "Fem2dWorkbench"
-                    color: "#1F2937"
-                    font.pixelSize: 12
-                    font.bold: true
-                }
-
-                Rectangle { width: 1; height: 14; color: "#D3DCE8" }
-
-                Label {
-                    text: "模块：" + root.currentMode
-                    color: "#64748B"
-                    font.pixelSize: 12
-                }
-
-                Rectangle { width: 1; height: 14; color: "#D3DCE8" }
-
-                Label {
-                    text: "工具：" + root.viewportTool
-                    color: "#64748B"
-                    font.pixelSize: 12
-                }
-
-                Rectangle { width: 1; height: 14; color: "#D3DCE8" }
-
-                Label {
-                    text: "缩放：" + Math.round(root.viewportScale * 100) + "%"
-                    color: "#64748B"
-                    font.pixelSize: 12
-                }
-
-                Rectangle { width: 1; height: 14; color: "#D3DCE8" }
-
-                Label {
-                    text: "选择：" + root.selectedObjectName
-                    color: root.selectedObjectType === "无" ? "#64748B" : "#1D4ED8"
-                    font.pixelSize: 12
-                    font.bold: root.selectedObjectType !== "无"
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 160
-                }
-
-                Rectangle { width: 1; height: 14; color: "#D3DCE8" }
-
-                Label {
-                    text: "文件：" + (bridge.projectPath === "" ? "outputs/latest" : bridge.projectPath)
-                    color: "#64748B"
-                    font.pixelSize: 12
-                    elide: Text.ElideMiddle
-                    Layout.maximumWidth: 260
-                }
-
-                Rectangle { width: 1; height: 14; color: "#D3DCE8" }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: "状态：" + bridge.statusText
-                    color: "#64748B"
-                    font.pixelSize: 12
-                    elide: Text.ElideRight
-                }
-
-                Label {
-                    text: bridge.hasSolution ? "已求解" : "未求解"
-                    color: bridge.hasSolution ? "#16A34A" : "#64748B"
-                    font.pixelSize: 12
-                    font.bold: bridge.hasSolution
-                }
-            }
-        }
-    }
-
-    Dialog {
-        id: objectPropertyDialog
-
-        modal: true
-        title: "对象属性"
-        width: 420
-        height: 320
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-
-        contentItem: ColumnLayout {
-            spacing: 12
-
-            ParamRow { name: "选择类型"; value: root.selectedObjectType }
-            ParamRow { name: "对象名称"; value: root.selectedObjectName }
-
-            Label {
-                Layout.fillWidth: true
-                text: root.selectedObjectDescription
-                wrapMode: Text.WordWrap
-                color: "#475569"
-                font.pixelSize: 12
-            }
-
-            ParamRow {
-                visible: root.viewportSelectionType === "point" && root.pointById(root.viewportSelectionId) !== null
-                name: "X"
-                value: root.pointById(root.viewportSelectionId) ? String(root.pointById(root.viewportSelectionId).x) : "—"
-            }
-            ParamRow {
-                visible: root.viewportSelectionType === "point" && root.pointById(root.viewportSelectionId) !== null
-                name: "Y"
-                value: root.pointById(root.viewportSelectionId) ? String(root.pointById(root.viewportSelectionId).y) : "—"
-            }
-            ParamRow {
-                visible: root.viewportSelectionType === "edge" && root.edgeById(root.viewportSelectionId) !== null
-                name: "起点"
-                value: root.edgeById(root.viewportSelectionId) ? root.edgeById(root.viewportSelectionId).start_point_id : "—"
-            }
-            ParamRow {
-                visible: root.viewportSelectionType === "edge" && root.edgeById(root.viewportSelectionId) !== null
-                name: "终点"
-                value: root.edgeById(root.viewportSelectionId) ? root.edgeById(root.viewportSelectionId).end_point_id : "—"
-            }
-            ParamRow {
-                visible: root.viewportSelectionType === "face" && root.faceById(root.viewportSelectionId) !== null
-                name: "闭合面"
-                value: root.viewportSelectionId
-            }
-            ParamRow {
-                visible: root.viewportSelectionType === "face" && root.faceById(root.viewportSelectionId) !== null
-                name: "边数"
-                value: root.faceById(root.viewportSelectionId) ? String(root.faceById(root.viewportSelectionId).edgeCount) : "—"
-            }
-            ParamRow {
-                visible: root.viewportSelectionType === "face" && root.faceById(root.viewportSelectionId) !== null
-                name: "节点数"
-                value: root.faceById(root.viewportSelectionId) ? String(root.faceById(root.viewportSelectionId).pointCount) : "—"
-            }
-
-            Item { Layout.fillHeight: true }
-
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                SecondaryButton {
-                    text: "关闭"
-                    buttonWidth: 80
-                    onClicked: objectPropertyDialog.close()
-                }
-            }
-        }
-    }
-
-    Dialog {
-        id: resultDialog
-
-        modal: true
-        title: "求解完成"
-        width: 420
-        height: 240
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-
-        contentItem: ColumnLayout {
-            spacing: 12
-
-            Label {
-                Layout.fillWidth: true
-                text: "当前模型已完成求解。结果明细请在“结果”模块查看。"
-                color: "#1F2937"
-                wrapMode: Text.WordWrap
-                font.pixelSize: 13
-            }
-
-            GridLayout {
-                Layout.fillWidth: true
-                columns: 2
-                columnSpacing: 12
-                rowSpacing: 8
-
-                ParamRow { name: "节点数"; value: bridge.hasSolution ? String(bridge.nodeCount) : "—" }
-                ParamRow { name: "单元数"; value: bridge.hasSolution ? String(bridge.elementCount) : "—" }
-                ParamRow { name: "最大位移"; value: bridge.hasSolution ? bridge.maxDisplacement : "—" }
-                ParamRow { name: "最大 Von Mises"; value: bridge.hasSolution ? bridge.maxVonMises : "—" }
-            }
-        }
-
-        footer: RowLayout {
+            anchors.margins: 16
             spacing: 10
 
-            Item { Layout.fillWidth: true }
-
-            SecondaryButton {
-                text: "查看结果"
-                buttonWidth: 88
-                onClicked: {
-                    resultDialog.close()
-                    root.showResultPage()
-                }
+            Label {
+                text: "当前材料"
+                color: "#1F2937"
+                font.pixelSize: 14
+                font.bold: true
             }
 
-            SecondaryButton {
-                text: "关闭"
-                buttonWidth: 80
-                onClicked: resultDialog.close()
+            TextArea {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 160
+                readOnly: true
+                text: bridge.materialRowsPreview
+                wrapMode: Text.WordWrap
+            }
+
+            ComboBox {
+                id: materialEditCombo
+                Layout.fillWidth: true
+                model: bridge.materialOptions
+            }
+
+            FormField { id: materialNameField; Layout.fillWidth: true; label: "材料名称"; text: "new_material" }
+            FormField { id: materialEField; Layout.fillWidth: true; label: "弹性模量"; text: "210000000000" }
+            FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
+            FormField { id: materialColorField; Layout.fillWidth: true; label: "颜色"; text: "#8FB7D8" }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                PrimaryButton {
+                    text: "新增材料"
+                    onClicked: bridge.addMaterial(
+                        materialNameField.text,
+                        Number(materialEField.text),
+                        Number(materialNuField.text),
+                        materialColorField.text
+                    )
+                }
+                SecondaryButton {
+                    text: "更新选中"
+                    onClicked: bridge.updateMaterial(
+                        root.parseMaterialIdFromOption(materialEditCombo.currentText),
+                        materialNameField.text,
+                        Number(materialEField.text),
+                        Number(materialNuField.text),
+                        materialColorField.text
+                    )
+                }
+                SecondaryButton {
+                    text: "删除选中"
+                    onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(materialEditCombo.currentText))
+                }
             }
         }
     }
 
     Dialog {
         id: deformationDialog
-
+        title: "显示变形图"
         modal: true
-        title: "变形图"
-        width: 720
+        width: 680
         height: 560
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-
-        contentItem: ColumnLayout {
-            spacing: 10
-
-            Label {
-                Layout.fillWidth: true
-                text: "基于当前求解结果绘制的放大变形网格。"
-                color: "#475569"
-                wrapMode: Text.WordWrap
-                font.pixelSize: 12
-            }
-
-            Canvas {
-                id: deformationCanvas
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    if (!bridge.hasSolution) {
-                        ctx.fillStyle = "#64748B"
-                        ctx.font = "14px 'Microsoft YaHei UI'"
-                        ctx.fillText("暂无可显示的变形结果。", 18, 28)
-                        return
-                    }
-                    var nodeRows = root.resultNodeRows()
-                    var elements = root.resultElementRows()
-                    if (nodeRows.length === 0 || elements.length === 0) {
-                        return
-                    }
-                    var minX = nodeRows[0].x
-                    var maxX = nodeRows[0].x
-                    var minY = nodeRows[0].y
-                    var maxY = nodeRows[0].y
-                    var maxDisp = 0.0
-                    for (var i = 0; i < nodeRows.length; i++) {
-                        minX = Math.min(minX, nodeRows[i].x)
-                        maxX = Math.max(maxX, nodeRows[i].x)
-                        minY = Math.min(minY, nodeRows[i].y)
-                        maxY = Math.max(maxY, nodeRows[i].y)
-                        maxDisp = Math.max(maxDisp, nodeRows[i].u_magnitude)
-                    }
-                    var spanX = Math.max(1e-6, maxX - minX)
-                    var spanY = Math.max(1e-6, maxY - minY)
-                    var scale = Math.min((width - 48) / spanX, (height - 48) / spanY)
-                    var exaggeration = maxDisp > 1e-12 ? 0.15 * Math.max(spanX, spanY) / maxDisp : 0.0
-                    var map = {}
-                    for (var j = 0; j < nodeRows.length; j++) {
-                        var row = nodeRows[j]
-                        map[row.node_id] = {
-                            x: 24 + (row.x + row.ux * exaggeration - minX) * scale,
-                            y: height - 24 - (row.y + row.uy * exaggeration - minY) * scale
-                        }
-                    }
-                    ctx.strokeStyle = "#1D4ED8"
-                    ctx.lineWidth = 1.4
-                    for (var e = 0; e < elements.length; e++) {
-                        var ids = elements[e].node_ids
-                        if (!map[ids[0]] || !map[ids[1]] || !map[ids[2]]) {
-                            continue
-                        }
-                        ctx.beginPath()
-                        ctx.moveTo(map[ids[0]].x, map[ids[0]].y)
-                        ctx.lineTo(map[ids[1]].x, map[ids[1]].y)
-                        ctx.lineTo(map[ids[2]].x, map[ids[2]].y)
-                        ctx.closePath()
-                        ctx.stroke()
-                    }
-                }
-            }
-        }
-
-        onOpened: deformationCanvas.requestPaint()
-        footer: RowLayout {
-            Item { Layout.fillWidth: true }
-            SecondaryButton { text: "关闭"; buttonWidth: 80; onClicked: deformationDialog.close() }
-        }
-    }
-
-    Dialog {
-        id: stressContourDialog
-
-        modal: true
-        title: "Von Mises 应力云图"
-        width: 720
-        height: 560
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-
-        contentItem: ColumnLayout {
-            spacing: 10
-
-            Label {
-                Layout.fillWidth: true
-                text: "按单元 Von Mises 应力绘制的简化云图。"
-                color: "#475569"
-                wrapMode: Text.WordWrap
-                font.pixelSize: 12
-            }
-
-            Canvas {
-                id: stressCanvas
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    if (!bridge.hasSolution) {
-                        ctx.fillStyle = "#64748B"
-                        ctx.font = "14px 'Microsoft YaHei UI'"
-                        ctx.fillText("暂无可显示的应力结果。", 18, 28)
-                        return
-                    }
-                    var nodes = root.resultNodeRows()
-                    var elements = root.resultElementRows()
-                    var elementRows = root.resultElementRowMap()
-                    if (nodes.length === 0 || elements.length === 0) {
-                        return
-                    }
-                    var minX = nodes[0].x
-                    var maxX = nodes[0].x
-                    var minY = nodes[0].y
-                    var maxY = nodes[0].y
-                    var values = []
-                    for (var i = 0; i < nodes.length; i++) {
-                        minX = Math.min(minX, nodes[i].x)
-                        maxX = Math.max(maxX, nodes[i].x)
-                        minY = Math.min(minY, nodes[i].y)
-                        maxY = Math.max(maxY, nodes[i].y)
-                    }
-                    for (var j = 0; j < elements.length; j++) {
-                        if (elementRows[elements[j].id]) {
-                            values.push(elementRows[elements[j].id].von_mises)
-                        }
-                    }
-                    var range = root.scalarRange(values)
-                    var spanX = Math.max(1e-6, maxX - minX)
-                    var spanY = Math.max(1e-6, maxY - minY)
-                    var scale = Math.min((width - 48) / spanX, (height - 48) / spanY)
-                    var map = {}
-                    for (var k = 0; k < nodes.length; k++) {
-                        map[nodes[k].node_id] = {
-                            x: 24 + (nodes[k].x - minX) * scale,
-                            y: height - 24 - (nodes[k].y - minY) * scale
-                        }
-                    }
-                    for (var e = 0; e < elements.length; e++) {
-                        var ids = elements[e].node_ids
-                        var row = elementRows[elements[e].id]
-                        if (!row || !map[ids[0]] || !map[ids[1]] || !map[ids[2]]) {
-                            continue
-                        }
-                        ctx.beginPath()
-                        ctx.moveTo(map[ids[0]].x, map[ids[0]].y)
-                        ctx.lineTo(map[ids[1]].x, map[ids[1]].y)
-                        ctx.lineTo(map[ids[2]].x, map[ids[2]].y)
-                        ctx.closePath()
-                        ctx.fillStyle = root.contourColor(row.von_mises, range.min, range.max, 0.78)
-                        ctx.fill()
-                        ctx.strokeStyle = "rgba(30,41,59,0.45)"
-                        ctx.lineWidth = 0.9
-                        ctx.stroke()
-                    }
-                }
-            }
-        }
-
-        onOpened: stressCanvas.requestPaint()
-        footer: RowLayout {
-            Item { Layout.fillWidth: true }
-            SecondaryButton { text: "关闭"; buttonWidth: 80; onClicked: stressContourDialog.close() }
-        }
-    }
-
-    Dialog {
-        id: parameterDialog
-
-        modal: true
-        title: "参数设置"
-        width: 560
-        height: 560
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-
-        contentItem: ColumnLayout {
-            spacing: 12
-
-            Label {
-                Layout.fillWidth: true
-                text: "应用参数后，请使用顶部工具栏的“更新工程”和“求解”刷新结果。"
-                color: "#64748B"
-                font.pixelSize: 13
-                wrapMode: Text.WordWrap
-            }
-
-            Rectangle { Layout.fillWidth: true; height: 1; color: "#D3DCE8" }
-
-            GridLayout {
-                Layout.fillWidth: true
-                columns: 2
-                columnSpacing: 14
-                rowSpacing: 10
-
-                FormField { id: widthField; label: "宽度"; suffix: "m"; text: "2.0"; Layout.fillWidth: true }
-                FormField { id: heightField; label: "高度"; suffix: "m"; text: "1.0"; Layout.fillWidth: true }
-                FormField { id: eField; label: "弹性模量"; suffix: "Pa"; text: "210000000000"; Layout.fillWidth: true }
-                FormField { id: nuField; label: "泊松比"; text: "0.3"; Layout.fillWidth: true }
-                FormField { id: thicknessField; label: "厚度"; suffix: "m"; text: "0.01"; Layout.fillWidth: true }
-                FormField { id: qyField; label: "右边界均布载荷"; suffix: "N/m²"; text: "-1000"; Layout.fillWidth: true }
-                FormField { id: nxField; label: "横向网格数"; text: "4"; Layout.fillWidth: true }
-                FormField { id: nyField; label: "纵向网格数"; text: "2"; Layout.fillWidth: true }
-            }
-
-            Item { Layout.fillHeight: true }
-        }
-
-        footer: RowLayout {
-            spacing: 10
-
-            Item { Layout.fillWidth: true }
-
-            SecondaryButton {
-                text: "取消"
-                buttonWidth: 76
-                onClicked: parameterDialog.close()
-            }
-
-            PrimaryButton {
-                text: "应用参数"
-                buttonWidth: 96
-                onClicked: root.applyParameters()
-            }
-        }
-    }
-
-    Dialog {
-        id: aboutDialog
-
-        modal: true
-        title: "关于 Fem2dWorkbench"
-        width: 450
         standardButtons: Dialog.Ok
+        onOpened: {
+            root.resultOverlayMode = "deformed"
+            deformationCanvas.requestPaint()
+            root.repaintViewport()
+        }
+        onClosed: {
+            root.resultOverlayMode = "none"
+            root.repaintViewport()
+        }
+
+        Canvas {
+            id: deformationCanvas
+            anchors.fill: parent
+            anchors.margins: 16
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = "#F8FAFC"
+                ctx.fillRect(0, 0, width, height)
+                ctx.fillStyle = "#334155"
+                ctx.font = "14px 'Microsoft YaHei UI'"
+                ctx.fillText("变形图已同步到中央视口。", 20, 36)
+                ctx.fillText("关闭此弹窗后会恢复普通视图。", 20, 62)
+            }
+        }
+    }
+
+    Dialog {
+        id: resultDialog
+        title: "显示 Von Mises 云图"
+        modal: true
+        width: 680
+        height: 560
+        standardButtons: Dialog.Ok
+        onOpened: {
+            root.resultOverlayMode = "vonMises"
+            contourCanvas.requestPaint()
+            root.repaintViewport()
+        }
+        onClosed: {
+            root.resultOverlayMode = "none"
+            root.repaintViewport()
+        }
+
+        Canvas {
+            id: contourCanvas
+            anchors.fill: parent
+            anchors.margins: 16
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = "#F8FAFC"
+                ctx.fillRect(0, 0, width, height)
+                ctx.fillStyle = "#334155"
+                ctx.font = "14px 'Microsoft YaHei UI'"
+                ctx.fillText("Von Mises 云图已同步到中央视口。", 20, 36)
+                ctx.fillText("关闭此弹窗后会恢复普通视图。", 20, 62)
+            }
+        }
+    }
+
+    function parseMaterialIdFromOption(optionText) {
+        var text = String(optionText)
+        var idx = text.indexOf("|")
+        if (idx < 0) {
+            return text.trim()
+        }
+        return text.substring(0, idx).trim()
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#EEF3F8"
 
         ColumnLayout {
-            width: parent.width
-            spacing: 10
-
-            Label {
-                text: "Fem2dWorkbench"
-                font.pixelSize: 24
-                font.bold: true
-                color: "#1F2937"
-            }
-
-            Label {
-                text: "二维有限元工程工作台"
-                font.pixelSize: 15
-                color: "#64748B"
-            }
-
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: "当前版本：工作台界面原型。\n当前后端支持：二维零件闭合面建模、高质量三角网格、平面应力线性静力求解、结果导出。"
-                color: "#64748B"
-            }
-        }
-    }
-
-    component ViewToolButton: Rectangle {
-        id: toolButton
-
-        property string text: ""
-        property bool active: false
-
-        signal clicked()
-
-        width: Math.max(56, label.implicitWidth + 18)
-        height: 24
-        radius: 6
-        color: active ? "#EAF2FF" : (mouse.containsMouse ? "#F1F5F9" : "#FFFFFF")
-        border.color: active ? "#BFDBFE" : "#D3DCE8"
-
-        Label {
-            id: label
-            anchors.centerIn: parent
-            text: toolButton.text
-            color: toolButton.active ? "#1D4ED8" : "#1F2937"
-            font.pixelSize: 11
-            font.bold: toolButton.active
-        }
-
-        MouseArea {
-            id: mouse
             anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: toolButton.clicked()
-        }
-    }
-
-    component PanelResizeHandle: Rectangle {
-        id: handle
-
-        property bool pressed: mouse.pressed
-        signal dragStarted(real mouseX, real mouseY)
-        signal dragMoved(real mouseX, real mouseY)
-        signal dragFinished()
-
-        width: root.splitterWidth
-        radius: 0
-        color: mouse.pressed ? "#CBD5E1" : (mouse.containsMouse ? "#E2E8F0" : "#F1F5F9")
-        border.color: mouse.containsMouse || mouse.pressed ? "#94A3B8" : "#E2E8F0"
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 3
-
-            Repeater {
-                model: 3
-
-                Rectangle {
-                    width: 2
-                    height: 12
-                    radius: 1
-                    color: mouse.containsMouse || mouse.pressed ? "#64748B" : "#CBD5E1"
-                }
-            }
-        }
-
-        MouseArea {
-            id: mouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.SizeHorCursor
-            preventStealing: true
-            acceptedButtons: Qt.LeftButton
-
-            onPressed: function(mouse) {
-                handle.dragStarted(mouse.x, mouse.y)
-                mouse.accepted = true
-            }
-
-            onPositionChanged: function(mouse) {
-                if (!pressed) {
-                    return
-                }
-                handle.dragMoved(mouse.x, mouse.y)
-                mouse.accepted = true
-            }
-
-            onReleased: function(mouse) {
-                handle.dragFinished()
-                mouse.accepted = true
-            }
-
-            onCanceled: {
-                handle.dragFinished()
-            }
-        }
-    }
-
-    component TreeItem: Rectangle {
-        id: treeItem
-
-        property string text: ""
-        property bool active: false
-
-        signal clicked()
-
-        Layout.fillWidth: true
-        height: 28
-        radius: 6
-        color: active ? "#EAF2FF" : (mouse.containsMouse ? "#F1F5F9" : "transparent")
-        border.color: active ? "#BFDBFE" : "transparent"
-
-        Label {
-            anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            text: treeItem.text
-            color: treeItem.active ? "#1D4ED8" : "#64748B"
-            font.pixelSize: 12
-            font.bold: treeItem.active
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-
-        MouseArea {
-            id: mouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: treeItem.clicked()
-        }
-    }
-
-    component NavItem: Rectangle {
-        id: navItem
-
-        property string indexText: ""
-        property string title: ""
-        property string desc: ""
-        property bool active: false
-
-        signal clicked()
-
-        Layout.fillWidth: true
-        height: 38
-        radius: 8
-        color: active ? "#EAF2FF" : (mouse.containsMouse ? "#F8FAFC" : "transparent")
-        border.color: active ? "#BFDBFE" : "transparent"
-
-        Rectangle {
-            visible: navItem.active
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            width: 3
-            height: 22
-            radius: 2
-            color: "#2563EB"
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 8
-            spacing: 8
+            spacing: 0
 
             Rectangle {
-                width: 28
-                height: 22
-                radius: 6
-                color: navItem.active ? "#DBEAFE" : "#EEF2F7"
-                border.color: navItem.active ? "#BFDBFE" : "#D3DCE8"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 64
+                color: "#FFFFFF"
+                border.color: "#D3DCE8"
 
-                Label {
-                    anchors.centerIn: parent
-                    text: navItem.indexText
-                    color: navItem.active ? "#1D4ED8" : "#64748B"
-                    font.pixelSize: 10
-                    font.bold: true
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 18
+                    anchors.rightMargin: 18
+                    spacing: 12
+
+                    Label {
+                        text: "Fem2dWorkbench"
+                        font.pixelSize: 22
+                        font.bold: true
+                        color: "#0F172A"
+                    }
+
+                    Label {
+                        text: "单模型四模块工作流"
+                        color: "#64748B"
+                        font.pixelSize: 13
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Button { text: "新建工程"; onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false } }
+                    Button { text: "打开工程"; onClicked: openProjectDialog.open() }
+                    Button { text: "保存工程"; onClicked: root.saveCurrentProjectWithDialogFallback() }
+                    Button { text: "另存为"; onClicked: saveProjectDialog.open() }
                 }
             }
 
-            ColumnLayout {
+            RowLayout {
+                id: mainWorkspaceRow
                 Layout.fillWidth: true
+                Layout.fillHeight: true
                 spacing: 0
 
-                Label {
-                    text: navItem.title
-                    color: navItem.active ? "#1D4ED8" : "#1F2937"
-                    font.pixelSize: 12
-                    font.bold: true
+                ScrollView {
+                    Layout.preferredWidth: root.leftPanelWidth
+                    Layout.fillHeight: true
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    Rectangle {
+                        width: root.leftPanelWidth
+                        color: "#F8FAFC"
+                        border.color: "#D3DCE8"
+                        implicitHeight: leftPanelColumn.implicitHeight + 32
+
+                        ColumnLayout {
+                            id: leftPanelColumn
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 14
+                            spacing: 12
+
+                            Label { text: "工作流"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+
+                            Repeater {
+                                model: ["建模与材料", "网格生成", "约束与载荷", "求解结果"]
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 42
+                                    radius: 10
+                                    color: modelData === root.currentMode ? "#DBEAFE" : "#FFFFFF"
+                                    border.color: modelData === root.currentMode ? "#60A5FA" : "#D3DCE8"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData
+                                        color: "#1F2937"
+                                        font.pixelSize: 13
+                                        font.bold: modelData === root.currentMode
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: root.switchMode(modelData)
+                                    }
+                                }
+                            }
+
+                            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
+
+                            Label { text: "当前选择"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                            Text { Layout.fillWidth: true; text: "类型：" + selectedObjectType; color: "#334155"; wrapMode: Text.WordWrap }
+                            Text { Layout.fillWidth: true; text: "名称：" + selectedObjectName; color: "#334155"; wrapMode: Text.WordWrap }
+                            Text { Layout.fillWidth: true; text: selectedObjectDescription; color: "#64748B"; wrapMode: Text.WordWrap }
+                            Button { text: "清空选择"; onClicked: root.clearSelection() }
+
+                            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
+
+                            Label { text: "模型概览"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                            Text { text: "点数：" + bridge.modelPointCount; color: "#334155" }
+                            Text { text: "边数：" + bridge.modelEdgeCount; color: "#334155" }
+                            Text { text: "闭合面数：" + bridge.modelFaceCount; color: "#334155" }
+                            Text { text: "网格节点：" + bridge.sketchMeshNodeCount; color: "#334155" }
+                            Text { text: "网格单元：" + bridge.sketchMeshElementCount; color: "#334155" }
+                            Text { text: "状态：" + bridge.statusText; color: "#64748B"; wrapMode: Text.WordWrap }
+                        }
+                    }
                 }
 
-                Label {
-                    text: navItem.desc
-                    color: "#64748B"
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
+                PanelResizeHandle {
+                    id: leftPanelResizeHandle
+                    Layout.fillHeight: true
+                    resizeLeft: true
+                }
+
+                Rectangle {
                     Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 0
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 48
+                            color: "#FFFFFF"
+                            border.color: "#D3DCE8"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 8
+                                Label { text: "视口"; font.pixelSize: 15; font.bold: true; color: "#0F172A" }
+                                Item { Layout.fillWidth: true }
+                                Button { text: "适配视图"; onClicked: { root.viewportScale = 1.0; root.viewportOffsetX = 0.0; root.viewportOffsetY = 0.0; root.repaintViewport() } }
+                                Button { text: "放大"; onClicked: { root.viewportScale *= 1.15; root.repaintViewport() } }
+                                Button { text: "缩小"; onClicked: { root.viewportScale /= 1.15; root.repaintViewport() } }
+                            }
+                        }
+
+                        Canvas {
+                            id: viewport
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            renderTarget: Canvas.FramebufferObject
+
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                root.clearViewportCanvas(ctx)
+                                root.drawViewportBackground(ctx)
+                                root.drawBaseGrid(ctx)
+                                root.drawModelGeometry(ctx)
+                                root.drawMeshLayer(ctx)
+                                root.drawBoundaryLayer(ctx)
+                                root.drawResultLayer(ctx)
+                                root.drawQueryPointLayer(ctx)
+                                root.drawLoadLayer(ctx)
+                                root.drawSelectionLayer(ctx)
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                hoverEnabled: true
+                                onPressed: function(mouse) {
+                                    root.lastMouseX = mouse.x
+                                    root.lastMouseY = mouse.y
+                                    if (mouse.button === Qt.RightButton) {
+                                        root.isPanning = true
+                                    } else {
+                                        root.startPointDragIfNeeded(mouse.x, mouse.y)
+                                    }
+                                }
+                                onClicked: function(mouse) {
+                                    if (!root.isDraggingPoint && mouse.button === Qt.LeftButton) {
+                                        root.handleViewportClick(mouse.x, mouse.y)
+                                    }
+                                }
+                                onPositionChanged: function(mouse) {
+                                    if (root.isDraggingPoint) {
+                                        var modelPos = root.screenToModel(mouse.x, mouse.y)
+                                        bridge.updateSelectedSketchPoint(modelPos.x, modelPos.y)
+                                        root.repaintViewport()
+                                    } else if (root.isPanning) {
+                                        root.viewportOffsetX += mouse.x - root.lastMouseX
+                                        root.viewportOffsetY += mouse.y - root.lastMouseY
+                                        root.lastMouseX = mouse.x
+                                        root.lastMouseY = mouse.y
+                                        root.repaintViewport()
+                                    }
+                                }
+                                onReleased: {
+                                    root.isDraggingPoint = false
+                                    root.isPanning = false
+                                }
+                                onCanceled: {
+                                    root.isDraggingPoint = false
+                                    root.isPanning = false
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 42
+                            color: "#FFFFFF"
+                            border.color: "#D3DCE8"
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 10
+                                Label { text: "提示：" + (root.viewportHint === "" ? bridge.statusText : root.viewportHint); color: "#475569"; font.pixelSize: 12 }
+                                Item { Layout.fillWidth: true }
+                                Label { text: "缩放：" + Math.round(root.viewportScale * 100) + "%"; color: "#64748B"; font.pixelSize: 12 }
+                            }
+                        }
+                    }
+                }
+
+                PanelResizeHandle {
+                    id: rightPanelResizeHandle
+                    Layout.fillHeight: true
+                    resizeLeft: false
+                }
+
+                ScrollView {
+                    Layout.preferredWidth: root.rightPanelWidth
+                    Layout.fillHeight: true
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    Rectangle {
+                        width: root.rightPanelWidth
+                        color: "#FFFFFF"
+                        border.color: "#D3DCE8"
+                        implicitHeight: rightPanelColumn.implicitHeight + 32
+
+                        ColumnLayout {
+                            id: rightPanelColumn
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 14
+                            spacing: 12
+
+                            Rectangle {
+                                visible: root.currentMode === "建模与材料"
+                                Layout.fillWidth: true
+                                color: "#F8FAFC"
+                                border.color: "#D3DCE8"
+                                radius: 10
+                                implicitHeight: modelingColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: modelingColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    Label { text: "建模工具"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Repeater {
+                                            model: ["选择", "添加节点", "连接边", "移动节点", "删除"]
+                                            delegate: Button {
+                                                text: modelData
+                                                onClicked: bridge.setModelTool(modelData)
+                                            }
+                                        }
+                                    }
+
+                                    FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
+                                    FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
+                                    Button { text: "按坐标添加点"; onClicked: bridge.addModelPoint(Number(pointXField.text), Number(pointYField.text)) }
+
+                                    FormField { id: edgeStartField; Layout.fillWidth: true; label: "起点 ID"; text: "p1" }
+                                    FormField { id: edgeEndField; Layout.fillWidth: true; label: "终点 ID"; text: "p2" }
+                                    Button { text: "连接边"; onClicked: bridge.connectModelEdge(edgeStartField.text, edgeEndField.text) }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button { text: "生成闭合面"; onClicked: bridge.buildModelFaces() }
+                                        Button { text: "清空几何"; onClicked: bridge.clearModelGeometry() }
+                                    }
+
+                                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
+
+                                    Label { text: "几何列表"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Label { text: "点列表"; color: "#334155"; font.pixelSize: 12 }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: bridge.sketchNodeRowsPreview }
+                                    Label { text: "边列表"; color: "#334155"; font.pixelSize: 12 }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: bridge.sketchEdgeRowsPreview }
+                                    Label { text: "闭合面列表"; color: "#334155"; font.pixelSize: 12 }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: root.faceRowsPreview() }
+
+                                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
+
+                                    Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    ComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
+                                    FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button {
+                                            text: "应用到选中闭合面"
+                                            onClicked: bridge.assignMaterialToSelectedFace(
+                                                root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                Number(thicknessAssignField.text)
+                                            )
+                                        }
+                                        Button {
+                                            text: "应用到全部闭合面"
+                                            onClicked: bridge.assignMaterialToAllFaces(
+                                                root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                Number(thicknessAssignField.text)
+                                            )
+                                        }
+                                    }
+
+                                    Button { text: "打开材料编辑器"; onClicked: materialEditorDialog.open() }
+
+                                    Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: root.currentMode === "网格生成"
+                                Layout.fillWidth: true
+                                color: "#F8FAFC"
+                                border.color: "#D3DCE8"
+                                radius: 10
+                                implicitHeight: meshColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: meshColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    Label { text: "网格生成"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Label { text: "唯一正式网格器：Gmsh CST 三角网格"; color: "#334155"; wrapMode: Text.WordWrap }
+                                    FormField { id: meshTargetSizeField; Layout.fillWidth: true; label: "target_size"; text: String(bridge.meshTargetSize) }
+                                    FormField { id: meshMinAngleField; Layout.fillWidth: true; label: "min_angle"; text: String(bridge.meshMinAngle) }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button { text: "生成网格"; onClicked: bridge.generateMesh(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
+                                        Button { text: "清除网格"; onClicked: bridge.clearMesh() }
+                                    }
+                                    Text { text: "网格后端状态：" + (bridge.currentMeshType === "none" ? "未生成" : bridge.currentMeshType); color: "#334155" }
+                                    Text { text: "节点数：" + bridge.sketchMeshNodeCount; color: "#334155" }
+                                    Text { text: "单元数：" + bridge.sketchMeshElementCount; color: "#334155" }
+                                    Text { text: "面积误差 / 质量摘要"; color: "#334155" }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 140; readOnly: true; text: bridge.meshQualitySummaryText === "" ? bridge.statusText : bridge.meshQualitySummaryText }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: root.currentMode === "约束与载荷"
+                                Layout.fillWidth: true
+                                color: "#F8FAFC"
+                                border.color: "#D3DCE8"
+                                radius: 10
+                                implicitHeight: targetColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: targetColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    Label { text: "约束与载荷"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        text: bridge.selectedTargetType === "" ? "当前目标：未选择" : "当前目标：" + bridge.selectedTargetType + " | " + bridge.selectedTargetId
+                                        color: "#334155"
+                                    }
+
+                                    CheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }
+                                    CheckBox { id: uyFixedBox; text: "固定 Uy"; checked: true }
+                                    Button { text: "添加约束"; onClicked: bridge.addConstraintToSelectedTarget(uxFixedBox.checked, uyFixedBox.checked) }
+
+                                    FormField { id: deleteBcField; Layout.fillWidth: true; label: "删除约束 ID"; text: "bc_1" }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button { text: "删除约束"; onClicked: bridge.deleteBoundaryCondition(deleteBcField.text) }
+                                        Button { text: "清空约束"; onClicked: bridge.clearConstraints() }
+                                    }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.boundaryConditionRowsPreview }
+
+                                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
+
+                                    Label { text: "载荷"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    FormField { id: loadXField; Layout.fillWidth: true; label: "Fx / qx"; text: "0.0" }
+                                    FormField { id: loadYField; Layout.fillWidth: true; label: "Fy / qy"; text: "-1000.0" }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button {
+                                            text: "添加集中力"
+                                            onClicked: bridge.addLoadToSelectedTarget("nodal_concentrated", Number(loadXField.text), Number(loadYField.text))
+                                        }
+                                        Button {
+                                            text: "添加均布载荷"
+                                            onClicked: bridge.addLoadToSelectedTarget("edge_uniform", Number(loadXField.text), Number(loadYField.text))
+                                        }
+                                    }
+                                    FormField { id: deleteLoadField; Layout.fillWidth: true; label: "删除载荷 ID"; text: "load_1" }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button { text: "删除载荷"; onClicked: bridge.deleteLoad(deleteLoadField.text) }
+                                        Button { text: "清空载荷"; onClicked: bridge.clearLoads() }
+                                    }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.loadRowsPreview }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: root.currentMode === "求解结果"
+                                Layout.fillWidth: true
+                                color: "#F8FAFC"
+                                border.color: "#D3DCE8"
+                                radius: 10
+                                implicitHeight: resultColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: resultColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    Label { text: "求解结果"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Button { text: "求解当前模型"; onClicked: bridge.solveCurrentModel() }
+                                    Text { text: "求解状态：" + bridge.statusText; color: "#334155"; wrapMode: Text.WordWrap }
+                                    Text { text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155" }
+                                    Text { text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155" }
+                                    Text { text: "Warning 数量：" + bridge.warningCount; color: "#334155" }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Button { text: "显示变形图"; enabled: bridge.hasSolution; onClicked: deformationDialog.open() }
+                                        Button { text: "显示 Von Mises 云图"; enabled: bridge.hasSolution; onClicked: resultDialog.open() }
+                                    }
+
+                                    FormField { id: queryXField; Layout.fillWidth: true; label: "查询 X"; text: String(bridge.resultQueryX) }
+                                    FormField { id: queryYField; Layout.fillWidth: true; label: "查询 Y"; text: String(bridge.resultQueryY) }
+                                    Button {
+                                        text: "查询结果"
+                                        onClicked: {
+                                            root.queryMarkerX = Number(queryXField.text)
+                                            root.queryMarkerY = Number(queryYField.text)
+                                            root.hasQueryMarker = true
+                                            bridge.queryResultAtPoint(Number(queryXField.text), Number(queryYField.text))
+                                        }
+                                    }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 150; readOnly: true; text: bridge.resultQueryText }
+
+                                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
+
+                                    Label { text: "导出"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Button { text: "导出全部结果"; onClicked: bridge.exportResults("outputs/latest") }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        }
-
-        MouseArea {
-            id: mouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: navItem.clicked()
         }
     }
 
-    component ParamRow: RowLayout {
-        property string name: ""
-        property string value: ""
 
-        Layout.fillWidth: true
+    Rectangle {
+        id: leftPanelToggleHandle
+        z: 1000
+        width: 22
+        height: 58
+        radius: 11
+        color: leftHandleMouseArea.containsMouse ? "#DCEBFF" : "#F1F5F9"
+        border.color: "#CBD5E1"
+        opacity: 0.96
+        x: root.leftPanelVisible ? Math.max(0, root.leftPanelWidth + 18 - width / 2) : 0
+        y: Math.max(104, root.height / 2 - height / 2)
 
-        Label {
-            text: parent.name
+        Text {
+            anchors.centerIn: parent
+            text: root.leftPanelVisible ? "◀" : "▶"
             color: "#64748B"
-            font.pixelSize: 12
-            Layout.fillWidth: true
-            elide: Text.ElideRight
+            font.pixelSize: 14
+            font.bold: true
         }
 
-        Label {
-            text: parent.value
-            color: "#1F2937"
-            font.pixelSize: 12
+        MouseArea {
+            id: leftHandleMouseArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.leftPanelVisible = !root.leftPanelVisible
+                root.leftPanelWidth = root.leftPanelVisible ? root.defaultLeftPanelWidth : 0
+                root.repaintViewport()
+            }
+        }
+    }
+
+    Rectangle {
+        id: rightPanelToggleHandle
+        z: 1000
+        width: 22
+        height: 58
+        radius: 11
+        color: rightHandleMouseArea.containsMouse ? "#DCEBFF" : "#F1F5F9"
+        border.color: "#CBD5E1"
+        opacity: 0.96
+        x: root.rightPanelVisible ? root.width - root.rightPanelWidth - 18 - width / 2 : root.width - width
+        y: Math.max(104, root.height / 2 - height / 2)
+
+        Text {
+            anchors.centerIn: parent
+            text: root.rightPanelVisible ? "▶" : "◀"
+            color: "#64748B"
+            font.pixelSize: 14
             font.bold: true
-            horizontalAlignment: Text.AlignRight
-            Layout.preferredWidth: 136
-            elide: Text.ElideRight
+        }
+
+        MouseArea {
+            id: rightHandleMouseArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.rightPanelVisible = !root.rightPanelVisible
+                root.rightPanelWidth = root.rightPanelVisible ? root.defaultRightPanelWidth : 0
+                root.repaintViewport()
+            }
         }
     }
 }

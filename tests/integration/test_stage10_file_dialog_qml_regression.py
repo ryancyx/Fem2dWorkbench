@@ -29,5 +29,5 @@ def test_main_workbench_uses_file_dialogs_for_project_open_and_save():
     for snippet in required_snippets:
         assert snippet in qml_text, f"Missing project file dialog QML snippet: {snippet}"
 
-    assert 'MenuItem { text: "打开工程"; onTriggered: bridge.loadProject("outputs/latest/current_project.f2dw.json") }' not in qml_text
-    assert 'MenuItem { text: "保存工程"; onTriggered: bridge.saveCurrentProject("outputs/latest/current_project.f2dw.json") }' not in qml_text
+    assert 'bridge.loadProject("outputs/latest/current_project.f2dw.json")' not in qml_text
+    assert 'bridge.saveCurrentProject("outputs/latest/current_project.f2dw.json")' not in qml_text

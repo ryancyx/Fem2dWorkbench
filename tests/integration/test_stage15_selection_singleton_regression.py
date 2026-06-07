@@ -11,21 +11,20 @@ def test_stage15_qml_contains_single_selection_helpers():
     qml_text = MAIN_WORKBENCH_QML.read_text(encoding="utf-8")
 
     assert "function clearViewportSelection()" in qml_text
-    assert "function selectOnlyPoint(pointId, description)" in qml_text
-    assert "function selectOnlyEdge(edgeId, description)" in qml_text
-    assert "function selectOnlyFace(faceId, description)" in qml_text
+    assert "selectedObjectType" in qml_text
+    assert "selectedObjectName" in qml_text
+    assert "selectedObjectDescription" in qml_text
+    assert "function syncSelectionSummary()" in qml_text
     assert "root.clearViewportSelection()" in qml_text
     assert "root.repaintViewport()" in qml_text
 
 
-def test_stage15_qml_boundary_and_load_handlers_do_not_select_faces():
+def test_stage15_target_selection_handlers_do_not_select_faces_for_loads_or_constraints():
     qml_text = MAIN_WORKBENCH_QML.read_text(encoding="utf-8")
 
-    boundary_start = qml_text.index("function handleBoundaryViewportClick")
-    load_start = qml_text.index("function handleLoadViewportClick")
-    readonly_start = qml_text.index("function handleReadonlyViewportPick")
-    boundary_block = qml_text[boundary_start:load_start]
-    load_block = qml_text[load_start:readonly_start]
+    target_start = qml_text.index("function handleTargetSelectionClick")
+    query_start = qml_text.index("function handleResultQueryClick")
+    target_block = qml_text[target_start:query_start]
 
-    assert "findSketchFaceAt" not in boundary_block
-    assert "findSketchFaceAt" not in load_block
+    assert "findFaceAt" not in target_block
+    assert "bridge.selectGeometryFace" not in target_block
