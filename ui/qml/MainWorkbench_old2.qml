@@ -22,10 +22,17 @@ ApplicationWindow {
     property real lastMouseX: 0.0
     property real lastMouseY: 0.0
     property bool isPanning: false
+    property bool viewportPanMode: false
+    property bool isPanningViewport: false
     property bool isDraggingPoint: false
     property bool viewportClickCandidate: false
     property real viewportPressX: 0.0
     property real viewportPressY: 0.0
+    property real panStartMouseX: 0.0
+    property real panStartMouseY: 0.0
+    property real panStartOffsetX: 0.0
+    property real panStartOffsetY: 0.0
+    property real clickMoveTolerance: 4.0
     property real sketchOriginX: 0.0
     property real sketchOriginY: 0.0
     property real sketchDrawScale: 100.0
@@ -148,6 +155,14 @@ ApplicationWindow {
     function deformationPlotData() {
         try {
             return JSON.parse(bridge.deformationPlotJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
+    function displacementContourData() {
+        try {
+            return JSON.parse(bridge.displacementContourJson)
         } catch (e) {
             return {}
         }
@@ -277,6 +292,9 @@ ApplicationWindow {
     function switchMode(modeName) {
         currentMode = modeName
         resultOverlayMode = modeName === "求解结果" ? resultOverlayMode : "none"
+        viewportPanMode = false
+        isPanningViewport = false
+        isPanning = false
         bridge.clearSelection()
         clearViewportSelection()
         viewportHint = ""
@@ -395,63 +413,33 @@ ApplicationWindow {
         return bridge.activePartMaterialColor === "" ? "#8FB7D8" : bridge.activePartMaterialColor
     }
 
-    function orderedFacePolygon(faceRow, pointMap) {
-        if (!faceRow || !faceRow.edge_ids || faceRow.edge_ids.length < 3) {
+    function faceScreenPolygon(faceRow, pointMap) {
+        if (!faceRow || !faceRow.point_ids || faceRow.point_ids.length < 3) {
             return []
-        }
-        var edges = modelEdges()
-        var edgeMap = {}
-        var adjacency = {}
-        for (var i = 0; i < edges.length; i++) {
-            edgeMap[edges[i].id] = edges[i]
-        }
-        for (var j = 0; j < faceRow.edge_ids.length; j++) {
-            var edge = edgeMap[faceRow.edge_ids[j]]
-            if (!edge) {
-                continue
-            }
-            if (!adjacency[edge.start_point_id]) {
-                adjacency[edge.start_point_id] = []
-            }
-            if (!adjacency[edge.end_point_id]) {
-                adjacency[edge.end_point_id] = []
-            }
-            adjacency[edge.start_point_id].push(edge.end_point_id)
-            adjacency[edge.end_point_id].push(edge.start_point_id)
-        }
-        var startEdge = edgeMap[faceRow.edge_ids[0]]
-        if (!startEdge) {
-            return []
-        }
-        var orderedIds = []
-        var startId = startEdge.start_point_id
-        var currentId = startId
-        var previousId = ""
-        var guard = 0
-        while (guard < faceRow.edge_ids.length + 2) {
-            orderedIds.push(currentId)
-            var neighbors = adjacency[currentId] || []
-            var nextId = ""
-            for (var k = 0; k < neighbors.length; k++) {
-                if (neighbors[k] !== previousId) {
-                    nextId = neighbors[k]
-                    break
-                }
-            }
-            if (nextId === "" || nextId === startId) {
-                break
-            }
-            previousId = currentId
-            currentId = nextId
-            guard += 1
         }
         var polygon = []
-        for (var m = 0; m < orderedIds.length; m++) {
-            if (pointMap[orderedIds[m]]) {
-                polygon.push(pointMap[orderedIds[m]])
+        for (var i = 0; i < faceRow.point_ids.length; i++) {
+            if (pointMap[faceRow.point_ids[i]]) {
+                polygon.push(pointMap[faceRow.point_ids[i]])
             }
         }
         return polygon
+    }
+
+    function orderedFacePolygon(faceRow, pointMap) {
+        return faceScreenPolygon(faceRow, pointMap)
+    }
+
+    function polygonArea(polygon) {
+        if (!polygon || polygon.length < 3) {
+            return 0
+        }
+        var area = 0
+        for (var i = 0; i < polygon.length; i++) {
+            var next = polygon[(i + 1) % polygon.length]
+            area += polygon[i].x * next.y - next.x * polygon[i].y
+        }
+        return Math.abs(area) * 0.5
     }
 
     function pointInPolygon(x, y, polygon) {
@@ -588,13 +576,19 @@ ApplicationWindow {
     function findFaceAt(mouseX, mouseY) {
         var faces = modelFaces()
         var pointMap = screenPointMap()
+        var bestId = ""
+        var bestArea = 1.0e18
         for (var i = faces.length - 1; i >= 0; i--) {
-            var polygon = orderedFacePolygon(faces[i], pointMap)
+            var polygon = faceScreenPolygon(faces[i], pointMap)
             if (polygon.length >= 3 && pointInPolygon(mouseX, mouseY, polygon)) {
-                return faces[i].id
+                var area = polygonArea(polygon)
+                if (area < bestArea) {
+                    bestArea = area
+                    bestId = faces[i].id
+                }
             }
         }
-        return ""
+        return bestId
     }
 
     function clearViewportCanvas(ctx) {
@@ -637,7 +631,7 @@ ApplicationWindow {
         var pointMap = screenPointMap()
 
         for (var fi = 0; fi < faces.length; fi++) {
-            var polygon = orderedFacePolygon(faces[fi], pointMap)
+            var polygon = faceScreenPolygon(faces[fi], pointMap)
             if (polygon.length < 3) {
                 continue
             }
@@ -811,6 +805,44 @@ ApplicationWindow {
         drawDistributedLoadOnEdgeSegment(ctx, startPoint, endPoint, qx, qy, 0.0, 1.0)
     }
 
+    function barycentricPoint(a, b, c, r, s) {
+        var wa = 1.0 - r - s
+        var wb = r
+        var wc = s
+        return {
+            x: a.x * wa + b.x * wb + c.x * wc,
+            y: a.y * wa + b.y * wb + c.y * wc,
+            value: wa * a.value + wb * b.value + wc * c.value
+        }
+    }
+
+    function fillTrianglePatch(ctx, p1, p2, p3, minValue, maxValue) {
+        var avg = (p1.value + p2.value + p3.value) / 3.0
+        ctx.beginPath()
+        ctx.moveTo(p1.x, p1.y)
+        ctx.lineTo(p2.x, p2.y)
+        ctx.lineTo(p3.x, p3.y)
+        ctx.closePath()
+        ctx.fillStyle = contourColor(avg, minValue, maxValue, 0.88)
+        ctx.fill()
+    }
+
+    function drawInterpolatedTriangleContour(ctx, a, b, c, minValue, maxValue, subdivisions) {
+        var n = Math.max(2, subdivisions)
+        for (var r = 0; r < n; r++) {
+            for (var s = 0; s < n - r; s++) {
+                var p0 = barycentricPoint(a, b, c, r / n, s / n)
+                var p1 = barycentricPoint(a, b, c, (r + 1) / n, s / n)
+                var p2 = barycentricPoint(a, b, c, r / n, (s + 1) / n)
+                fillTrianglePatch(ctx, p0, p1, p2, minValue, maxValue)
+                if (s < n - r - 1) {
+                    var p3 = barycentricPoint(a, b, c, (r + 1) / n, (s + 1) / n)
+                    fillTrianglePatch(ctx, p1, p3, p2, minValue, maxValue)
+                }
+            }
+        }
+    }
+
     function drawResultLayer(ctx) {
         if (!bridge.hasSolution || resultOverlayMode === "none") {
             return
@@ -919,22 +951,10 @@ ApplicationWindow {
                 if (!edge || !pointMap[edge.start_point_id] || !pointMap[edge.end_point_id]) {
                     continue
                 }
-                root.drawDistributedLoadOnEdge(
+                root.drawDistributedLoadOnEdgeSegment(
                     ctx,
                     pointMap[edge.start_point_id],
                     pointMap[edge.end_point_id],
-                    rows[i].qx,
-                    rows[i].qy
-                )
-            } else if (rows[i].target_type === "geometry_edge_segment") {
-                var segmentEdge = edgeById(rows[i].target_id)
-                if (!segmentEdge || !pointMap[segmentEdge.start_point_id] || !pointMap[segmentEdge.end_point_id]) {
-                    continue
-                }
-                root.drawDistributedLoadOnEdgeSegment(
-                    ctx,
-                    pointMap[segmentEdge.start_point_id],
-                    pointMap[segmentEdge.end_point_id],
                     rows[i].qx,
                     rows[i].qy,
                     rows[i].start_t,
@@ -954,7 +974,7 @@ ApplicationWindow {
                 if (faces[i].id !== bridge.selectedFaceId) {
                     continue
                 }
-                var polygon = orderedFacePolygon(faces[i], pointMap)
+                var polygon = faceScreenPolygon(faces[i], pointMap)
                 if (polygon.length < 3) {
                     continue
                 }
@@ -999,6 +1019,9 @@ ApplicationWindow {
     }
 
     function handleModelingClick(mouseX, mouseY) {
+        if (root.viewportPanMode) {
+            return
+        }
         var pointId = findNearestPointAt(mouseX, mouseY)
         var edgeId = findNearestEdgeAt(mouseX, mouseY)
         var faceId = findFaceAt(mouseX, mouseY)
@@ -1014,15 +1037,19 @@ ApplicationWindow {
         if (bridge.partEditTool === "连接边") {
             if (pointId === "") {
                 bridge.clearSelection()
-                viewportHint = "请点击一个点作为连边端点。"
+                viewportHint = "已清除未完成连边起点。"
             } else if (bridge.edgeStartPointId === "") {
                 bridge.selectGeometryPoint(pointId)
                 bridge.startEdgeFromSelectedPoint()
                 viewportHint = "已记录起点，请点击第二个点完成连边。"
             } else {
-                bridge.connectEdgeToPoint(pointId)
-                bridge.selectGeometryPoint(pointId)
-                viewportHint = "已完成连边。"
+                var connectOk = bridge.connectEdgeToPoint(pointId)
+                if (connectOk) {
+                    bridge.selectGeometryPoint(pointId)
+                    viewportHint = "已完成连边。"
+                } else {
+                    viewportHint = bridge.statusText
+                }
             }
             repaintViewport()
             return
@@ -1058,6 +1085,23 @@ ApplicationWindow {
             bridge.clearSelection()
             viewportHint = "已清空选择。"
         }
+        repaintViewport()
+    }
+
+    function setModelingTool(toolName) {
+        if (toolName === "移动视图") {
+            root.viewportPanMode = true
+            root.isPanningViewport = false
+            root.isPanning = false
+            bridge.clearSelection()
+            viewportHint = "移动视图：拖动中央视口以平移。"
+            repaintViewport()
+            return
+        }
+        root.viewportPanMode = false
+        root.isPanningViewport = false
+        root.isPanning = false
+        bridge.setModelTool(toolName)
         repaintViewport()
     }
 
@@ -1173,7 +1217,7 @@ ApplicationWindow {
         clampPanelWidths()
         bridge.newProject()
         bridge.createEmptySketchForActivePart()
-        bridge.setModelTool("选择")
+        root.setModelingTool("选择")
         repaintViewport()
     }
 
@@ -1277,18 +1321,17 @@ ApplicationWindow {
     }
 
     Dialog {
-        id: deformationPlotDialog
-        title: "显示变形图"
+        id: displacementContourDialog
+        title: "显示位移云图"
         modal: true
         width: 760
         height: 620
         standardButtons: Dialog.Ok
         onOpened: {
-            var data = root.deformationPlotData()
-            var summary = data.summary || {}
-            deformationScaleField.text = String(summary.default_scale_factor || 1.0)
+            var data = root.displacementContourData()
+            displacementScaleField.text = String(data.default_scale_factor || 1.0)
             root.resultOverlayMode = "deformed"
-            deformationCanvas.requestPaint()
+            displacementContourCanvas.requestPaint()
             root.repaintViewport()
         }
         onClosed: {
@@ -1305,24 +1348,24 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 8
                 FormField {
-                    id: deformationScaleField
+                    id: displacementScaleField
                     Layout.preferredWidth: 180
                     label: "放大系数"
                     text: "1.0"
                 }
                 Button {
                     text: "刷新"
-                    onClicked: deformationCanvas.requestPaint()
+                    onClicked: displacementContourCanvas.requestPaint()
                 }
                 Button {
-                    text: "导出云图数据"
-                    onClicked: bridge.exportContourData("outputs/latest")
+                    text: "导出位移云图数据"
+                    onClicked: bridge.exportDisplacementContourData("outputs/latest")
                 }
                 Item { Layout.fillWidth: true }
             }
 
             Canvas {
-                id: deformationCanvas
+                id: displacementContourCanvas
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onPaint: {
@@ -1331,7 +1374,7 @@ ApplicationWindow {
                     ctx.fillStyle = "#F8FAFC"
                     ctx.fillRect(0, 0, width, height)
 
-                    var data = root.deformationPlotData()
+                    var data = root.displacementContourData()
                     var nodes = data.nodes || []
                     var elements = data.elements || []
                     if (nodes.length === 0 || elements.length === 0) {
@@ -1341,7 +1384,7 @@ ApplicationWindow {
                         return
                     }
 
-                    var factor = Number(deformationScaleField.text)
+                    var factor = Number(displacementScaleField.text)
                     if (!isFinite(factor) || factor <= 0.0) {
                         factor = 1.0
                     }
@@ -1350,25 +1393,43 @@ ApplicationWindow {
                     var deformedPoints = []
                     var originalMap = {}
                     var deformedMap = {}
+                    var displacementNodeMap = {}
                     for (var i = 0; i < nodes.length; i++) {
                         var node = nodes[i]
                         var original = { x: node.x, y: node.y }
                         var deformed = { x: node.x + node.ux * factor, y: node.y + node.uy * factor }
                         originalPoints.push(original)
                         deformedPoints.push(deformed)
-                        originalMap[node.node_id] = original
-                        deformedMap[node.node_id] = deformed
+                        originalMap[node.id] = original
+                        deformedMap[node.id] = deformed
+                        displacementNodeMap[node.id] = node
                     }
 
                     var transform = root.canvasTransformForPoints(originalPoints.concat(deformedPoints), width, height, 24)
+                    var minDisplacement = Number(data.min_displacement || 0.0)
+                    var maxDisplacement = Number(data.max_displacement || 0.0)
 
-                    ctx.strokeStyle = "#CBD5E1"
-                    ctx.lineWidth = 1
                     for (var j = 0; j < elements.length; j++) {
                         var tri = elements[j].node_ids
-                        var oa = root.canvasPoint(transform, originalMap[tri[0]])
-                        var ob = root.canvasPoint(transform, originalMap[tri[1]])
-                        var oc = root.canvasPoint(transform, originalMap[tri[2]])
+                        var aNode = displacementNodeMap[tri[0]]
+                        var bNode = displacementNodeMap[tri[1]]
+                        var cNode = displacementNodeMap[tri[2]]
+                        var a = root.canvasPoint(transform, { x: aNode.x + aNode.ux * factor, y: aNode.y + aNode.uy * factor })
+                        var b = root.canvasPoint(transform, { x: bNode.x + bNode.ux * factor, y: bNode.y + bNode.uy * factor })
+                        var c = root.canvasPoint(transform, { x: cNode.x + cNode.ux * factor, y: cNode.y + cNode.uy * factor })
+                        a.value = aNode.u
+                        b.value = bNode.u
+                        c.value = cNode.u
+                        root.drawInterpolatedTriangleContour(ctx, a, b, c, minDisplacement, maxDisplacement, 12)
+                    }
+
+                    ctx.strokeStyle = "rgba(15, 23, 42, 0.12)"
+                    ctx.lineWidth = 0.7
+                    for (var k = 0; k < elements.length; k++) {
+                        var originalIds = elements[k].node_ids
+                        var oa = root.canvasPoint(transform, originalMap[originalIds[0]])
+                        var ob = root.canvasPoint(transform, originalMap[originalIds[1]])
+                        var oc = root.canvasPoint(transform, originalMap[originalIds[2]])
                         ctx.beginPath()
                         ctx.moveTo(oa.x, oa.y)
                         ctx.lineTo(ob.x, ob.y)
@@ -1378,9 +1439,9 @@ ApplicationWindow {
                     }
 
                     ctx.strokeStyle = "#7C3AED"
-                    ctx.lineWidth = 1.4
-                    for (var k = 0; k < elements.length; k++) {
-                        var ids = elements[k].node_ids
+                    ctx.lineWidth = 1.1
+                    for (var m = 0; m < elements.length; m++) {
+                        var ids = elements[m].node_ids
                         var da = root.canvasPoint(transform, deformedMap[ids[0]])
                         var db = root.canvasPoint(transform, deformedMap[ids[1]])
                         var dc = root.canvasPoint(transform, deformedMap[ids[2]])
@@ -1391,6 +1452,11 @@ ApplicationWindow {
                         ctx.closePath()
                         ctx.stroke()
                     }
+
+                    ctx.fillStyle = "#334155"
+                    ctx.font = "13px 'Microsoft YaHei UI'"
+                    ctx.fillText("min = " + minDisplacement.toExponential(4), 20, 28)
+                    ctx.fillText("max = " + maxDisplacement.toExponential(4), 20, 50)
                 }
             }
         }
@@ -1421,9 +1487,15 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
+                ComboBox {
+                    id: stressContourModeCombo
+                    Layout.preferredWidth: 180
+                    model: ["精确模式", "平滑模式"]
+                    onActivated: stressContourCanvas.requestPaint()
+                }
                 Button {
-                    text: "导出云图数据"
-                    onClicked: bridge.exportContourData("outputs/latest")
+                    text: "导出应力云图数据"
+                    onClicked: bridge.exportStressContourData("outputs/latest")
                 }
                 Item { Layout.fillWidth: true }
             }
@@ -1453,34 +1525,44 @@ ApplicationWindow {
                         nodeMap[nodes[i].id] = nodes[i]
                     }
                     var transform = root.canvasTransformForPoints(nodes, width, height, 24)
-                    var values = []
-                    for (var j = 0; j < elements.length; j++) {
-                        values.push(elements[j].von_mises)
-                    }
-                    var range = root.scalarRange(values)
+                    var exactMode = stressContourModeCombo.currentIndex === 0
+                    var minValue = exactMode ? Number(data.min_von_mises || 0.0) : Number(data.min_smoothed_von_mises || 0.0)
+                    var maxValue = exactMode ? Number(data.max_von_mises || 0.0) : Number(data.max_smoothed_von_mises || 0.0)
 
-                    for (var k = 0; k < elements.length; k++) {
-                        var row = elements[k]
+                    for (var j = 0; j < elements.length; j++) {
+                        var row = elements[j]
                         var ids = row.node_ids
                         var a = root.canvasPoint(transform, nodeMap[ids[0]])
                         var b = root.canvasPoint(transform, nodeMap[ids[1]])
                         var c = root.canvasPoint(transform, nodeMap[ids[2]])
+                        if (exactMode) {
+                            ctx.beginPath()
+                            ctx.moveTo(a.x, a.y)
+                            ctx.lineTo(b.x, b.y)
+                            ctx.lineTo(c.x, c.y)
+                            ctx.closePath()
+                            ctx.fillStyle = root.contourColor(row.element_von_mises, minValue, maxValue, 0.88)
+                            ctx.fill()
+                        } else {
+                            a.value = row.nodal_smoothed_von_mises[0]
+                            b.value = row.nodal_smoothed_von_mises[1]
+                            c.value = row.nodal_smoothed_von_mises[2]
+                            root.drawInterpolatedTriangleContour(ctx, a, b, c, minValue, maxValue, 12)
+                        }
+                        ctx.strokeStyle = "rgba(15, 23, 42, 0.18)"
+                        ctx.lineWidth = 0.8
                         ctx.beginPath()
                         ctx.moveTo(a.x, a.y)
                         ctx.lineTo(b.x, b.y)
                         ctx.lineTo(c.x, c.y)
                         ctx.closePath()
-                        ctx.fillStyle = root.contourColor(row.von_mises, range.min, range.max, 0.82)
-                        ctx.fill()
-                        ctx.strokeStyle = "rgba(15, 23, 42, 0.18)"
-                        ctx.lineWidth = 0.8
                         ctx.stroke()
                     }
 
                     ctx.fillStyle = "#334155"
                     ctx.font = "13px 'Microsoft YaHei UI'"
-                    ctx.fillText("min = " + range.min.toExponential(4), 20, 28)
-                    ctx.fillText("max = " + range.max.toExponential(4), 20, 50)
+                    ctx.fillText("min = " + minValue.toExponential(4), 20, 28)
+                    ctx.fillText("max = " + maxValue.toExponential(4), 20, 50)
                 }
             }
         }
@@ -1493,6 +1575,55 @@ ApplicationWindow {
             return text.trim()
         }
         return text.substring(0, idx).trim()
+    }
+
+    function parseFaceIdFromOption(optionText) {
+        var text = String(optionText)
+        var idx = text.indexOf("|")
+        if (idx < 0) {
+            return text.trim()
+        }
+        return text.substring(0, idx).trim()
+    }
+
+    function faceOptionsFromJson() {
+        var faces = modelFaces()
+        var faceMaterials = faceMaterialRows()
+        var materialMap = {}
+        for (var i = 0; i < faceMaterials.length; i++) {
+            var row = faceMaterials[i]
+            materialMap[row.face_id] = row.material_name || "未指定"
+        }
+
+        var options = []
+        for (var j = 0; j < faces.length; j++) {
+            var face = faces[j]
+            var edgeCount = face.edge_ids ? face.edge_ids.length : 0
+            var materialName = materialMap[face.id] || "未指定"
+            options.push(face.id + " | " + edgeCount + " 边 | " + materialName)
+        }
+        return options
+    }
+
+    function faceOptionIndexById(faceId) {
+        if (faceId === "") {
+            return faceOptionsFromJson().length > 0 ? 0 : -1
+        }
+        var options = faceOptionsFromJson()
+        for (var i = 0; i < options.length; i++) {
+            if (parseFaceIdFromOption(options[i]) === faceId) {
+                return i
+            }
+        }
+        return options.length > 0 ? 0 : -1
+    }
+
+    function currentFaceDisplayText() {
+        if (bridge.selectedFaceId !== "") {
+            return bridge.selectedFaceId
+        }
+        var faceId = parseFaceIdFromOption(faceTargetCombo.currentText)
+        return faceId === "" ? "未选择" : faceId
     }
 
     Rectangle {
@@ -1667,6 +1798,9 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 hoverEnabled: true
+                                cursorShape: root.viewportPanMode
+                                             ? (root.isPanningViewport ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
+                                             : Qt.ArrowCursor
 
                                 onPressed: function(mouse) {
                                     root.lastMouseX = mouse.x
@@ -1674,6 +1808,18 @@ ApplicationWindow {
                                     root.viewportPressX = mouse.x
                                     root.viewportPressY = mouse.y
                                     root.viewportClickCandidate = mouse.button === Qt.LeftButton
+
+                                    if (root.viewportPanMode && mouse.button === Qt.LeftButton) {
+                                        root.isPanningViewport = true
+                                        root.isPanning = false
+                                        root.viewportClickCandidate = false
+                                        root.panStartMouseX = mouse.x
+                                        root.panStartMouseY = mouse.y
+                                        root.panStartOffsetX = root.viewportOffsetX
+                                        root.panStartOffsetY = root.viewportOffsetY
+                                        mouse.accepted = true
+                                        return
+                                    }
 
                                     if (mouse.button === Qt.RightButton) {
                                         root.isPanning = true
@@ -1689,11 +1835,16 @@ ApplicationWindow {
                                 onPositionChanged: function(mouse) {
                                     var dx = mouse.x - root.viewportPressX
                                     var dy = mouse.y - root.viewportPressY
-                                    if (root.viewportClickCandidate && Math.sqrt(dx * dx + dy * dy) > 4) {
+                                    if (root.viewportClickCandidate && Math.sqrt(dx * dx + dy * dy) > root.clickMoveTolerance) {
                                         root.viewportClickCandidate = false
                                     }
 
-                                    if (root.isDraggingPoint) {
+                                    if (root.isPanningViewport) {
+                                        root.viewportOffsetX = root.panStartOffsetX + (mouse.x - root.panStartMouseX)
+                                        root.viewportOffsetY = root.panStartOffsetY + (mouse.y - root.panStartMouseY)
+                                        root.repaintViewport()
+                                        mouse.accepted = true
+                                    } else if (root.isDraggingPoint) {
                                         root.updateViewportGeometryFrame()
                                         var modelPos = root.screenToModel(mouse.x, mouse.y)
                                         bridge.updateSelectedSketchPoint(modelPos.x, modelPos.y)
@@ -1708,6 +1859,14 @@ ApplicationWindow {
                                 }
 
                                 onReleased: function(mouse) {
+                                    if (root.isPanningViewport) {
+                                        root.viewportClickCandidate = false
+                                        root.isDraggingPoint = false
+                                        root.isPanningViewport = false
+                                        root.isPanning = false
+                                        mouse.accepted = true
+                                        return
+                                    }
                                     if (root.viewportClickCandidate
                                             && mouse.button === Qt.LeftButton
                                             && !root.isDraggingPoint
@@ -1717,12 +1876,14 @@ ApplicationWindow {
 
                                     root.viewportClickCandidate = false
                                     root.isDraggingPoint = false
+                                    root.isPanningViewport = false
                                     root.isPanning = false
                                 }
 
                                 onCanceled: {
                                     root.viewportClickCandidate = false
                                     root.isDraggingPoint = false
+                                    root.isPanningViewport = false
                                     root.isPanning = false
                                 }
                             }
@@ -1796,7 +1957,23 @@ ApplicationWindow {
                                             model: ["选择", "添加节点", "连接边", "移动节点", "删除"]
                                             delegate: Button {
                                                 text: modelData
-                                                onClicked: bridge.setModelTool(modelData)
+                                                onClicked: root.setModelingTool(modelData)
+                                            }
+                                        }
+                                        Button {
+                                            text: "移动视图"
+                                            onClicked: root.setModelingTool("移动视图")
+                                        }
+                                        Button {
+                                            text: "视图复位"
+                                            onClicked: {
+                                                root.viewportPanMode = false
+                                                root.isPanningViewport = false
+                                                root.isPanning = false
+                                                root.viewportOffsetX = 0.0
+                                                root.viewportOffsetY = 0.0
+                                                root.viewportScale = 1.0
+                                                root.repaintViewport()
                                             }
                                         }
                                     }
@@ -1829,6 +2006,34 @@ ApplicationWindow {
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
+                                    ComboBox {
+                                        id: faceTargetCombo
+                                        Layout.fillWidth: true
+                                        model: root.faceOptionsFromJson()
+                                        currentIndex: root.faceOptionIndexById(bridge.selectedFaceId)
+                                        displayText: count > 0 ? currentText : "请先生成闭合面"
+                                        onActivated: function(index) {
+                                            var faceId = root.parseFaceIdFromOption(faceTargetCombo.textAt(index))
+                                            if (faceId !== "") {
+                                                bridge.selectGeometryFace(faceId)
+                                                root.repaintViewport()
+                                            }
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Label { text: "当前闭合面"; color: "#334155"; font.pixelSize: 12 }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: root.currentFaceDisplayText()
+                                            color: "#0F172A"
+                                            font.pixelSize: 12
+                                            horizontalAlignment: Text.AlignRight
+                                            elide: Text.ElideRight
+                                        }
+                                    }
                                     ComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
                                     FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
 
@@ -1837,10 +2042,19 @@ ApplicationWindow {
                                         spacing: 8
                                         Button {
                                             text: "应用到选中闭合面"
-                                            onClicked: bridge.assignMaterialToSelectedFace(
-                                                root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                Number(thicknessAssignField.text)
-                                            )
+                                            onClicked: {
+                                                var faceId = root.parseFaceIdFromOption(faceTargetCombo.currentText)
+                                                if (faceId === "") {
+                                                    viewportHint = "请先生成并选择闭合面。"
+                                                    return
+                                                }
+                                                bridge.selectGeometryFace(faceId)
+                                                bridge.assignMaterialToSelectedFace(
+                                                    root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                    Number(thicknessAssignField.text)
+                                                )
+                                                root.repaintViewport()
+                                            }
                                         }
                                         Button {
                                             text: "应用到全部闭合面"
@@ -1932,10 +2146,6 @@ ApplicationWindow {
                                     FormField { id: loadYField; Layout.fillWidth: true; label: "Fy / qy"; text: "-1000.0" }
                                     FormField { id: loadStartTField; Layout.fillWidth: true; label: "start_t"; text: String(bridge.edgeLoadStartT) }
                                     FormField { id: loadEndTField; Layout.fillWidth: true; label: "end_t"; text: String(bridge.edgeLoadEndT) }
-                                    FormField { id: loadStartXField; Layout.fillWidth: true; label: "起点 X"; text: "0.0" }
-                                    FormField { id: loadStartYField; Layout.fillWidth: true; label: "起点 Y"; text: "0.0" }
-                                    FormField { id: loadEndXField; Layout.fillWidth: true; label: "终点 X"; text: "0.0" }
-                                    FormField { id: loadEndYField; Layout.fillWidth: true; label: "终点 Y"; text: "0.0" }
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
@@ -1958,15 +2168,6 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button {
-                                            text: "坐标投影区间"
-                                            onClicked: bridge.setSelectedEdgeLoadSegmentFromCoordinates(
-                                                Number(loadStartXField.text),
-                                                Number(loadStartYField.text),
-                                                Number(loadEndXField.text),
-                                                Number(loadEndYField.text)
-                                            )
-                                        }
                                         Button {
                                             text: bridge.edgeLoadSegmentSelectionMode ? "取消区间设置" : "设置局部载荷区间"
                                             onClicked: {
@@ -2026,17 +2227,17 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                         spacing: 8
                                         Button {
-                                            text: "显示变形图"
+                                            text: "显示位移云图"
                                             onClicked: {
                                                 if (!bridge.hasSolution) {
                                                     root.viewportHint = "请先求解。"
                                                     return
                                                 }
-                                                deformationPlotDialog.open()
+                                                displacementContourDialog.open()
                                             }
                                         }
                                         Button {
-                                            text: "显示 Von Mises 云图"
+                                            text: "显示应力云图"
                                             onClicked: {
                                                 if (!bridge.hasSolution) {
                                                     root.viewportHint = "请先求解。"
@@ -2063,7 +2264,8 @@ ApplicationWindow {
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "导出"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Button { text: "导出云图数据"; onClicked: bridge.exportContourData("outputs/latest") }
+                                    Button { text: "导出位移云图数据"; onClicked: bridge.exportDisplacementContourData("outputs/latest") }
+                                    Button { text: "导出应力云图数据"; onClicked: bridge.exportStressContourData("outputs/latest") }
                                     Button { text: "导出全部结果"; onClicked: bridge.exportResults("outputs/latest") }
                                 }
                             }

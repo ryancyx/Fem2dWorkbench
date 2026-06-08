@@ -90,6 +90,8 @@ class GeometryModel:
     points: list[GeometryPoint] = field(default_factory=list)
     edges: list[GeometryEdge] = field(default_factory=list)
     faces: list[GeometryFace] = field(default_factory=list)
+    _normalization_stats: dict[str, Any] = field(default_factory=dict, repr=False)
+    _face_build_stats: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self._validate_unique_ids("points", [point.id for point in self.points])

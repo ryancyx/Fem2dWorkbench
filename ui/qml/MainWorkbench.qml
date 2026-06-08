@@ -16,7 +16,14 @@ ApplicationWindow {
     color: "#EEF3F8"
 
     property string currentMode: "建模与材料"
-    property real viewportScale: 1.0
+    // 视图缩放说明：viewportScaleDisplayBase 对应界面显示的 100%。
+    // 这里把上一版“1%”的实际大小重新标定为 100%，
+    // 默认视图再缩小 10 倍，因此默认显示为 10%。
+    property real viewportScaleDisplayBase: 0.01
+    property real defaultViewportScale: 0.001
+    property real viewportScale: defaultViewportScale
+    property real minViewportScale: 0.000001
+    property real maxViewportScale: 10.0
     property real viewportOffsetX: 0.0
     property real viewportOffsetY: 0.0
     property real lastMouseX: 0.0
@@ -289,6 +296,36 @@ ApplicationWindow {
         }
     }
 
+    function clampViewportScale(value) {
+        return Math.max(root.minViewportScale, Math.min(root.maxViewportScale, value))
+    }
+
+    function resetViewportTransform() {
+        root.viewportScale = root.defaultViewportScale
+        root.viewportOffsetX = 0.0
+        root.viewportOffsetY = 0.0
+        root.repaintViewport()
+    }
+
+    function zoomViewportBy(factor) {
+        root.viewportScale = root.clampViewportScale(root.viewportScale * factor)
+        root.repaintViewport()
+    }
+
+    function viewportScaleText() {
+        var percent = root.viewportScale / root.viewportScaleDisplayBase * 100.0
+        if (percent < 0.1) {
+            return percent.toFixed(2) + "%"
+        }
+        if (percent < 10.0) {
+            return percent.toFixed(1) + "%"
+        }
+        if (percent < 1000.0) {
+            return percent.toFixed(0) + "%"
+        }
+        return percent.toFixed(0) + "%"
+    }
+
     function switchMode(modeName) {
         currentMode = modeName
         resultOverlayMode = modeName === "求解结果" ? resultOverlayMode : "none"
@@ -499,7 +536,9 @@ ApplicationWindow {
         var maxDrawW = viewport.width * 0.68
         var maxDrawH = viewport.height * 0.62
         var drawScale = Math.min(maxDrawW / modelW, maxDrawH / modelH) * root.viewportScale
-        drawScale = Math.max(48.0, drawScale)
+        // 上一版 1% 视图对应的最小绘制尺度是 48。
+        // 现在将该大小标定为 100%，并让绘制尺度随 viewportScale 线性缩放。
+        drawScale = Math.max(48.0 * (root.viewportScale / root.viewportScaleDisplayBase), drawScale)
         root.sketchDrawScale = drawScale
         root.lastModelBoundsW = modelW * drawScale
         root.lastModelBoundsH = modelH * drawScale
@@ -1768,9 +1807,9 @@ ApplicationWindow {
                                 spacing: 8
                                 Label { text: "视口"; font.pixelSize: 15; font.bold: true; color: "#0F172A" }
                                 Item { Layout.fillWidth: true }
-                                Button { text: "适配视图"; onClicked: { root.viewportScale = 1.0; root.viewportOffsetX = 0.0; root.viewportOffsetY = 0.0; root.repaintViewport() } }
-                                Button { text: "放大"; onClicked: { root.viewportScale *= 1.15; root.repaintViewport() } }
-                                Button { text: "缩小"; onClicked: { root.viewportScale /= 1.15; root.repaintViewport() } }
+                                Button { text: "适配视图"; onClicked: root.resetViewportTransform() }
+                                Button { text: "放大"; onClicked: root.zoomViewportBy(1.15) }
+                                Button { text: "缩小"; onClicked: root.zoomViewportBy(1.0 / 1.15) }
                             }
                         }
 
@@ -1901,7 +1940,7 @@ ApplicationWindow {
                                 spacing: 10
                                 Label { text: "提示：" + (root.viewportHint === "" ? bridge.statusText : root.viewportHint); color: "#475569"; font.pixelSize: 12 }
                                 Item { Layout.fillWidth: true }
-                                Label { text: "缩放：" + Math.round(root.viewportScale * 100) + "%"; color: "#64748B"; font.pixelSize: 12 }
+                                Label { text: "缩放：" + root.viewportScaleText(); color: "#64748B"; font.pixelSize: 12 }
                             }
                         }
                     }
@@ -1970,10 +2009,7 @@ ApplicationWindow {
                                                 root.viewportPanMode = false
                                                 root.isPanningViewport = false
                                                 root.isPanning = false
-                                                root.viewportOffsetX = 0.0
-                                                root.viewportOffsetY = 0.0
-                                                root.viewportScale = 1.0
-                                                root.repaintViewport()
+                                                root.resetViewportTransform()
                                             }
                                         }
                                     }

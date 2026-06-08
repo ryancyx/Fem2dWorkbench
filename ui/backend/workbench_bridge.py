@@ -1969,13 +1969,20 @@ class WorkbenchBridge(QObject):
                 self.edge_start_point_id = ""
                 self.partEditChanged.emit()
             build_faces_from_edges(part.geometry)
+            normalization_stats = getattr(part.geometry, "_normalization_stats", {}) or {}
+            split_edge_count = int(normalization_stats.get("split_edge_count", 0) or 0)
             self.project_dirty = True
             self.clearSelection()
             self._clear_solution()
             self._clear_sketch_mesh(emit_signal=True)
             self._sync_sketch_from_active_part()
             self._sync_material_state_from_project()
-            self._set_status_text(f"已生成 {len(part.geometry.faces)} 个闭合面")
+            if split_edge_count > 0:
+                self._set_status_text(
+                    f"已自动拆分 {split_edge_count} 条边，生成 {len(part.geometry.faces)} 个闭合面。"
+                )
+            else:
+                self._set_status_text(f"已生成 {len(part.geometry.faces)} 个闭合面")
             self.projectChanged.emit()
             self.resultChanged.emit()
             return True

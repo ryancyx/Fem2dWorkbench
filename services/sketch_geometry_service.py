@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - depends on local environment
     unary_union = None
 
 
-_EPS = 1.0e-8
+GEOMETRY_TOLERANCE = 1.0e-8
 
 
 @dataclass(frozen=True)
@@ -130,9 +130,72 @@ def delete_sketch_edge(geometry: GeometryModel, edge_id: str) -> GeometryModel:
     return geometry
 
 
+def normalize_edges_by_embedded_points(geometry: GeometryModel) -> dict[str, int]:
+    point_by_id = {point.id: point for point in geometry.points}
+    new_edges: list[GeometryEdge] = []
+    created_segment_keys: dict[frozenset[str], str] = {}
+    split_edge_count = 0
+    created_edge_count = 0
+    reused_segment_count = 0
+
+    for edge in geometry.edges:
+        start_xy = _point_xy(point_by_id[edge.start_point_id])
+        end_xy = _point_xy(point_by_id[edge.end_point_id])
+        embedded_points: list[tuple[float, str]] = []
+        for point in geometry.points:
+            if point.id in {edge.start_point_id, edge.end_point_id}:
+                continue
+            t = _point_projection_parameter(_point_xy(point), start_xy, end_xy)
+            if t is None:
+                continue
+            if t <= GEOMETRY_TOLERANCE or t >= 1.0 - GEOMETRY_TOLERANCE:
+                continue
+            embedded_points.append((t, point.id))
+
+        if not embedded_points:
+            if _append_edge_if_new(new_edges, created_segment_keys, edge.id, edge.start_point_id, edge.end_point_id):
+                created_edge_count += 1
+            else:
+                reused_segment_count += 1
+            continue
+
+        split_edge_count += 1
+        unique_embedded_points: list[tuple[float, str]] = []
+        seen_point_ids: set[str] = set()
+        for t, point_id in sorted(embedded_points, key=lambda item: (item[0], item[1])):
+            if point_id in seen_point_ids:
+                continue
+            seen_point_ids.add(point_id)
+            unique_embedded_points.append((t, point_id))
+
+        ordered_point_ids = [edge.start_point_id] + [point_id for _, point_id in unique_embedded_points] + [edge.end_point_id]
+        segment_index = 1
+        for start_point_id, end_point_id in zip(ordered_point_ids[:-1], ordered_point_ids[1:]):
+            if start_point_id == end_point_id:
+                continue
+            segment_id = f"{edge.id}_{segment_index}"
+            if _append_edge_if_new(new_edges, created_segment_keys, segment_id, start_point_id, end_point_id):
+                created_edge_count += 1
+            else:
+                reused_segment_count += 1
+            segment_index += 1
+
+    geometry.edges = new_edges
+    geometry.faces = []
+    stats = {
+        "split_edge_count": split_edge_count,
+        "created_edge_count": created_edge_count,
+        "reused_segment_count": reused_segment_count,
+        "final_edge_count": len(new_edges),
+    }
+    geometry._normalization_stats = stats
+    return stats
+
+
 def can_build_single_closed_face(geometry: GeometryModel) -> bool:
     try:
-        return len(_extract_face_loops(geometry, require_all_edges=False)) == 1
+        candidate = _clone_geometry(geometry)
+        return len(_extract_face_loops(candidate, require_all_edges=False)) == 1
     except ValueError:
         return False
 
@@ -146,32 +209,21 @@ def build_geometry_diagnostics_text(geometry: GeometryModel) -> str:
     lines = [
         f"point_count={diagnostics['point_count']}",
         f"edge_count={diagnostics['edge_count']}",
-        f"connected_component_count={len(diagnostics['components'])}",
         f"candidate_face_count={diagnostics['candidate_face_count']}",
         f"dangles={diagnostics['dangle_count']}",
         f"cuts={diagnostics['cut_count']}",
         f"invalids={diagnostics['invalid_count']}",
+        f"embedded_point_hits={diagnostics['embedded_point_hits']}",
     ]
     if diagnostics["duplicate_edge_groups"]:
         duplicate_rows = ["/".join(group["edge_ids"]) for group in diagnostics["duplicate_edge_groups"]]
         lines.append(f"duplicate_edges={'; '.join(duplicate_rows)}")
-    if diagnostics["overlapping_edge_pairs"]:
-        overlap_rows = [
+    if diagnostics["pairwise_edge_issues"]:
+        issue_rows = [
             f"{row['edge_ids'][0]}/{row['edge_ids'][1]}@{row['kind']}"
-            for row in diagnostics["overlapping_edge_pairs"]
+            for row in diagnostics["pairwise_edge_issues"]
         ]
-        lines.append(f"overlap_or_nonnoded={'; '.join(overlap_rows)}")
-    for component in diagnostics["components"]:
-        lines.append(
-            f"component {component['index']}: node_count={component['node_count']} "
-            f"edge_count={component['edge_count']}"
-        )
-        if component["degree_rows"]:
-            degree_rows = [
-                f"{row['point_id']} degree={row['degree']} edges={'/'.join(row['edge_ids'])}"
-                for row in component["degree_rows"]
-            ]
-            lines.append(f"  degrees: {'; '.join(degree_rows)}")
+        lines.append(f"edge_issues={'; '.join(issue_rows)}")
     return "\n".join(lines)
 
 
@@ -190,21 +242,30 @@ def build_single_face_from_edges(geometry: GeometryModel) -> GeometryModel:
 
 
 def build_faces_from_edges(geometry: GeometryModel) -> GeometryModel:
-    loop_rows = _extract_face_loops(geometry, require_all_edges=True)
-    previous_section_id_by_edge_set = {
+    previous_section_by_edge_set = {
         frozenset(face.edge_ids): face.section_id
         for face in geometry.faces
         if face.section_id
     }
-    geometry.faces = [
-        GeometryFace(
-            id=f"f{index}",
-            edge_ids=list(loop_row.edge_ids),
-            point_ids=list(loop_row.point_ids),
-            section_id=previous_section_id_by_edge_set.get(frozenset(loop_row.edge_ids), ""),
+    previous_section_by_point_set = {
+        frozenset(face.point_ids): face.section_id
+        for face in geometry.faces
+        if face.section_id and face.point_ids
+    }
+    loop_rows = _extract_face_loops(geometry, require_all_edges=True)
+    geometry.faces = []
+    for index, loop_row in enumerate(loop_rows, start=1):
+        section_id = previous_section_by_edge_set.get(frozenset(loop_row.edge_ids), "")
+        if not section_id:
+            section_id = previous_section_by_point_set.get(frozenset(loop_row.point_ids), "")
+        geometry.faces.append(
+            GeometryFace(
+                id=f"f{index}",
+                edge_ids=list(loop_row.edge_ids),
+                point_ids=list(loop_row.point_ids),
+                section_id=section_id,
+            )
         )
-        for index, loop_row in enumerate(loop_rows, start=1)
-    ]
     return geometry
 
 
@@ -218,23 +279,22 @@ def clear_sketch_geometry(geometry: GeometryModel) -> GeometryModel:
 def create_geometry_from_polygon_points(points: list[tuple[float, float]]) -> GeometryModel:
     if len(points) < 3:
         raise ValueError("Polygon sketch requires at least 3 points")
-
     geometry = create_empty_sketch_geometry()
     for x, y in points:
         add_sketch_point(geometry, x, y)
-
     point_ids = [point.id for point in geometry.points]
     for index, start_point_id in enumerate(point_ids):
         end_point_id = point_ids[(index + 1) % len(point_ids)]
         add_sketch_edge(geometry, start_point_id, end_point_id)
-
     build_single_face_from_edges(geometry)
     return geometry
 
 
 def _extract_face_loops(geometry: GeometryModel, require_all_edges: bool) -> list[_FaceLoop]:
+    normalize_edges_by_embedded_points(geometry)
     point_by_id = {point.id: point for point in geometry.points}
     edge_by_id = {edge.id: edge for edge in geometry.edges}
+
     duplicate_edge_groups = _find_duplicate_edges(geometry)
     if duplicate_edge_groups:
         first_group = duplicate_edge_groups[0]
@@ -244,53 +304,54 @@ def _extract_face_loops(geometry: GeometryModel, require_all_edges: bool) -> lis
             f" edge_ids={'/'.join(first_group['edge_ids'])}。"
         )
 
-    topology_issues = _find_pairwise_edge_issues(geometry, point_by_id)
-    if topology_issues:
-        first_issue = topology_issues[0]
+    pairwise_edge_issues = _find_pairwise_edge_issues(geometry, point_by_id)
+    if pairwise_edge_issues:
+        first_issue = pairwise_edge_issues[0]
         raise ValueError(
             "闭合面生成失败：检测到未节点化交叉或重叠边。"
             f" edge_ids={first_issue['edge_ids'][0]}/{first_issue['edge_ids'][1]};"
             f" kind={first_issue['kind']};"
             f" detail={first_issue['detail']}。"
-            " 如为共线接触，请先在交点处拆分边。"
         )
 
     if len(geometry.edges) < 3:
         raise ValueError("闭合面生成失败：至少需要 3 条边。")
 
     if LineString is not None and unary_union is not None and polygonize_full is not None:
-        loop_rows, diagnostics = _extract_face_loops_with_shapely(geometry, point_by_id, edge_by_id)
+        loop_rows, diagnostics = _extract_face_loops_with_shapely(geometry, point_by_id)
     else:
-        loop_rows, diagnostics = _extract_face_loops_fallback(geometry, point_by_id, edge_by_id)
+        loop_rows, diagnostics = _extract_face_loops_fallback(geometry, point_by_id)
 
     if not loop_rows:
-        raise ValueError(_format_polygonize_failure(diagnostics, "未识别到任何闭合面"))
-
+        raise ValueError(_format_face_failure(diagnostics, "未识别到任何闭合面"))
     if require_all_edges and (diagnostics["dangle_count"] or diagnostics["cut_count"] or diagnostics["invalid_count"]):
-        raise ValueError(_format_polygonize_failure(diagnostics, "线网中仍有未参与成面的边"))
-
+        raise ValueError(_format_face_failure(diagnostics, "线网中仍有未参与成面的边"))
     loop_rows.sort(key=lambda row: row.sort_key)
+    geometry._face_build_stats = diagnostics
     return loop_rows
 
 
 def _extract_face_loops_with_shapely(
     geometry: GeometryModel,
     point_by_id: dict[str, GeometryPoint],
-    edge_by_id: dict[str, GeometryEdge],
-) -> tuple[list[_FaceLoop], dict[str, object]]:
-    lines = []
-    for edge in geometry.edges:
-        start = point_by_id[edge.start_point_id]
-        end = point_by_id[edge.end_point_id]
-        lines.append(LineString([(start.x, start.y), (end.x, end.y)]))
-
+) -> tuple[list[_FaceLoop], dict[str, int]]:
+    lines = [
+        LineString(
+            [
+                _point_xy(point_by_id[edge.start_point_id]),
+                _point_xy(point_by_id[edge.end_point_id]),
+            ]
+        )
+        for edge in geometry.edges
+    ]
     merged = unary_union(lines)
     polygons, dangles, cuts, invalids = polygonize_full(merged)
-
     loop_rows: list[_FaceLoop] = []
+    edge_lookup = _edge_lookup_by_points(geometry)
+    point_lookup = _point_lookup_by_coordinates(point_by_id)
     for polygon in polygons.geoms:
         coords = list(polygon.exterior.coords)
-        point_ids, edge_ids = _map_polygon_segments_to_geometry(coords, geometry, point_by_id, edge_by_id)
+        point_ids, edge_ids = _map_polygon_coords_to_geometry(coords, point_lookup, edge_lookup)
         ordered_points = [_point_xy(point_by_id[point_id]) for point_id in point_ids]
         loop_rows.append(
             _FaceLoop(
@@ -300,7 +361,6 @@ def _extract_face_loops_with_shapely(
                 sort_key=_component_sort_key(ordered_points),
             )
         )
-
     diagnostics = {
         "candidate_face_count": len(loop_rows),
         "dangle_count": len(list(dangles.geoms)),
@@ -314,15 +374,13 @@ def _extract_face_loops_with_shapely(
 def _extract_face_loops_fallback(
     geometry: GeometryModel,
     point_by_id: dict[str, GeometryPoint],
-    edge_by_id: dict[str, GeometryEdge],
-) -> tuple[list[_FaceLoop], dict[str, object]]:
+) -> tuple[list[_FaceLoop], dict[str, int]]:
     adjacency = _build_sorted_adjacency(geometry, point_by_id)
     edge_id_by_endpoint_pair = {
         frozenset((edge.start_point_id, edge.end_point_id)): edge.id for edge in geometry.edges
     }
-
     visited_half_edges: set[tuple[str, str]] = set()
-    bounded_faces: list[_FaceLoop] = []
+    candidate_faces: list[_FaceLoop] = []
     for edge in geometry.edges:
         for start_point_id, end_point_id in (
             (edge.start_point_id, edge.end_point_id),
@@ -332,23 +390,21 @@ def _extract_face_loops_fallback(
                 continue
             try:
                 point_ids, edge_ids = _trace_face_cycle(
-                    start_point_id=start_point_id,
-                    end_point_id=end_point_id,
-                    adjacency=adjacency,
-                    point_by_id=point_by_id,
-                    edge_id_by_endpoint_pair=edge_id_by_endpoint_pair,
+                    start_point_id,
+                    end_point_id,
+                    adjacency,
+                    edge_id_by_endpoint_pair,
                 )
             except ValueError:
                 continue
-            for directed_edge in zip(point_ids, point_ids[1:] + [point_ids[0]]):
+            directed_edges = list(zip(point_ids, point_ids[1:] + [point_ids[0]]))
+            for directed_edge in directed_edges:
                 visited_half_edges.add(directed_edge)
             ordered_points = [_point_xy(point_by_id[point_id]) for point_id in point_ids]
             signed_area = _signed_area_xy(ordered_points)
-            if abs(signed_area) <= _EPS:
+            if abs(signed_area) <= GEOMETRY_TOLERANCE or signed_area < 0.0:
                 continue
-            if signed_area < 0.0:
-                continue
-            bounded_faces.append(
+            candidate_faces.append(
                 _FaceLoop(
                     edge_ids=edge_ids,
                     point_ids=point_ids,
@@ -358,12 +414,12 @@ def _extract_face_loops_fallback(
             )
 
     unique_faces: list[_FaceLoop] = []
-    seen_face_keys: set[tuple[str, ...]] = set()
-    for face in bounded_faces:
+    seen_keys: set[tuple[str, ...]] = set()
+    for face in candidate_faces:
         face_key = _canonical_cycle_key(face.point_ids)
-        if face_key in seen_face_keys:
+        if face_key in seen_keys:
             continue
-        seen_face_keys.add(face_key)
+        seen_keys.add(face_key)
         unique_faces.append(face)
 
     usage_count_by_edge_id: dict[str, int] = defaultdict(int)
@@ -378,7 +434,7 @@ def _extract_face_loops_fallback(
             continue
         start_degree = len(adjacency[edge.start_point_id])
         end_degree = len(adjacency[edge.end_point_id])
-        if start_degree == 1 or end_degree == 1:
+        if start_degree <= 1 or end_degree <= 1:
             dangle_count += 1
         else:
             cut_count += 1
@@ -396,36 +452,40 @@ def _extract_face_loops_fallback(
 def _analyze_geometry_topology(geometry: GeometryModel) -> dict[str, object]:
     point_by_id = {point.id: point for point in geometry.points}
     adjacency: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    point_to_edge_ids: dict[str, list[str]] = defaultdict(list)
     participating_points: set[str] = set()
-
     for edge in geometry.edges:
         if edge.start_point_id not in point_by_id or edge.end_point_id not in point_by_id:
             raise ValueError(f"Sketch edge {edge.id!r} references unknown points")
         adjacency[edge.start_point_id].append((edge.end_point_id, edge.id))
         adjacency[edge.end_point_id].append((edge.start_point_id, edge.id))
-        point_to_edge_ids[edge.start_point_id].append(edge.id)
-        point_to_edge_ids[edge.end_point_id].append(edge.id)
         participating_points.add(edge.start_point_id)
         participating_points.add(edge.end_point_id)
 
     duplicate_edge_groups = _find_duplicate_edges(geometry)
-    overlapping_edge_pairs = _find_pairwise_edge_issues(geometry, point_by_id)
-    components = _connected_components(participating_points, adjacency)
-    component_rows: list[dict[str, object]] = []
-    for index, component in enumerate(components, start=1):
+    pairwise_edge_issues = _find_pairwise_edge_issues(geometry, point_by_id)
+    embedded_point_hits = _count_embedded_points(geometry, point_by_id)
+    candidate_face_count = 0
+    dangle_count = 0
+    cut_count = 0
+    invalid_count = len(pairwise_edge_issues)
+    if len(geometry.edges) >= 3 and not duplicate_edge_groups and not pairwise_edge_issues:
+        temp_geometry = _clone_geometry(geometry)
+        try:
+            loops = _extract_face_loops(temp_geometry, require_all_edges=False)
+            candidate_face_count = len(loops)
+            stats = getattr(temp_geometry, "_face_build_stats", {})
+            dangle_count = int(stats.get("dangle_count", 0))
+            cut_count = int(stats.get("cut_count", 0))
+            invalid_count += int(stats.get("invalid_count", 0))
+        except ValueError:
+            pass
+
+    component_rows = []
+    for index, component in enumerate(_connected_components(participating_points, adjacency), start=1):
         component_edge_ids = [
             edge.id
             for edge in geometry.edges
             if edge.start_point_id in component and edge.end_point_id in component
-        ]
-        degree_rows = [
-            {
-                "point_id": point_id,
-                "degree": len(adjacency[point_id]),
-                "edge_ids": sorted(point_to_edge_ids[point_id]),
-            }
-            for point_id in sorted(component)
         ]
         component_rows.append(
             {
@@ -434,48 +494,82 @@ def _analyze_geometry_topology(geometry: GeometryModel) -> dict[str, object]:
                 "node_count": len(component),
                 "edge_count": len(component_edge_ids),
                 "edge_ids": sorted(component_edge_ids),
-                "degree_rows": degree_rows,
             }
         )
-
-    candidate_face_count = 0
-    dangle_count = 0
-    cut_count = 0
-    invalid_count = len(overlapping_edge_pairs)
-    if not duplicate_edge_groups and not overlapping_edge_pairs and len(geometry.edges) >= 3:
-        try:
-            _, polygonize_diagnostics = _extract_face_loops(geometry, require_all_edges=False), None
-        except ValueError:
-            polygonize_diagnostics = None
-        else:
-            polygonize_diagnostics = None
-        try:
-            loops = _extract_face_loops(geometry, require_all_edges=False)
-            candidate_face_count = len(loops)
-        except ValueError:
-            pass
-        try:
-            if LineString is not None and unary_union is not None and polygonize_full is not None:
-                _, polygonize_diag = _extract_face_loops_with_shapely(geometry, point_by_id, {edge.id: edge for edge in geometry.edges})
-            else:
-                _, polygonize_diag = _extract_face_loops_fallback(geometry, point_by_id, {edge.id: edge for edge in geometry.edges})
-            dangle_count = int(polygonize_diag["dangle_count"])
-            cut_count = int(polygonize_diag["cut_count"])
-            invalid_count += int(polygonize_diag["invalid_count"])
-        except ValueError:
-            pass
 
     return {
         "point_count": len(geometry.points),
         "edge_count": len(geometry.edges),
         "components": component_rows,
         "duplicate_edge_groups": duplicate_edge_groups,
-        "overlapping_edge_pairs": overlapping_edge_pairs,
+        "pairwise_edge_issues": pairwise_edge_issues,
+        "embedded_point_hits": embedded_point_hits,
         "candidate_face_count": candidate_face_count,
         "dangle_count": dangle_count,
         "cut_count": cut_count,
         "invalid_count": invalid_count,
     }
+
+
+def _count_embedded_points(
+    geometry: GeometryModel,
+    point_by_id: dict[str, GeometryPoint],
+) -> int:
+    embedded_hit_count = 0
+    for edge in geometry.edges:
+        start_xy = _point_xy(point_by_id[edge.start_point_id])
+        end_xy = _point_xy(point_by_id[edge.end_point_id])
+        for point in geometry.points:
+            if point.id in {edge.start_point_id, edge.end_point_id}:
+                continue
+            t = _point_projection_parameter(_point_xy(point), start_xy, end_xy)
+            if t is None:
+                continue
+            if GEOMETRY_TOLERANCE < t < 1.0 - GEOMETRY_TOLERANCE:
+                embedded_hit_count += 1
+    return embedded_hit_count
+
+
+def _point_projection_parameter(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float | None:
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length_sq = dx * dx + dy * dy
+    if length_sq <= GEOMETRY_TOLERANCE:
+        return None
+    t = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_sq
+    projection = (start[0] + t * dx, start[1] + t * dy)
+    if _distance(point, projection) > GEOMETRY_TOLERANCE:
+        return None
+    if not _point_on_segment(projection, start, end):
+        return None
+    return t
+
+
+def _append_edge_if_new(
+    edge_rows: list[GeometryEdge],
+    segment_keys: dict[frozenset[str], str],
+    edge_id: str,
+    start_point_id: str,
+    end_point_id: str,
+) -> bool:
+    if start_point_id == end_point_id:
+        return False
+    segment_key = frozenset((start_point_id, end_point_id))
+    if segment_key in segment_keys:
+        return False
+    segment_keys[segment_key] = edge_id
+    edge_rows.append(
+        GeometryEdge(
+            id=edge_id,
+            start_point_id=start_point_id,
+            end_point_id=end_point_id,
+        )
+    )
+    return True
 
 
 def _build_sorted_adjacency(
@@ -487,7 +581,7 @@ def _build_sorted_adjacency(
         adjacency[edge.start_point_id].append(edge.end_point_id)
         adjacency[edge.end_point_id].append(edge.start_point_id)
     for point_id, neighbors in adjacency.items():
-        unique_neighbors = sorted(
+        adjacency[point_id] = sorted(
             set(neighbors),
             key=lambda neighbor_id: (
                 math.atan2(
@@ -497,7 +591,6 @@ def _build_sorted_adjacency(
                 neighbor_id,
             ),
         )
-        adjacency[point_id] = unique_neighbors
     return adjacency
 
 
@@ -505,7 +598,6 @@ def _trace_face_cycle(
     start_point_id: str,
     end_point_id: str,
     adjacency: dict[str, list[str]],
-    point_by_id: dict[str, GeometryPoint],
     edge_id_by_endpoint_pair: dict[frozenset[str], str],
 ) -> tuple[list[str], list[str]]:
     start = (start_point_id, end_point_id)
@@ -513,26 +605,22 @@ def _trace_face_cycle(
     seen_directed_edges: set[tuple[str, str]] = set()
     point_ids = [start_point_id]
     edge_ids: list[str] = []
-
     while True:
         current_start_id, current_end_id = current
         if current in seen_directed_edges:
-            raise ValueError("闭合面生成失败：检测到非法环遍历，可能存在重复边或错误连接。")
+            raise ValueError("duplicate directed edge traversal")
         seen_directed_edges.add(current)
         point_ids.append(current_end_id)
-
         edge_id = edge_id_by_endpoint_pair.get(frozenset((current_start_id, current_end_id)))
         if edge_id is None:
-            raise ValueError("闭合面生成失败：面边界段无法映射到原始几何边。")
+            raise ValueError("missing mapped edge")
         edge_ids.append(edge_id)
-
         next_point_id = _choose_next_face_neighbor(current_start_id, current_end_id, adjacency)
         current = (current_end_id, next_point_id)
         if current == start:
             break
         if len(point_ids) > len(edge_id_by_endpoint_pair) + 2:
-            raise ValueError("闭合面生成失败：面边界遍历异常，可能存在未节点化交叉。")
-
+            raise ValueError("trace exceeded edge count")
     if point_ids[-1] == point_ids[0]:
         point_ids.pop()
     return point_ids, edge_ids
@@ -545,81 +633,54 @@ def _choose_next_face_neighbor(
 ) -> str:
     neighbors = adjacency[current_point_id]
     if previous_point_id not in neighbors:
-        raise ValueError("闭合面生成失败：边连接关系异常。")
+        raise ValueError("neighbor ordering mismatch")
     previous_index = neighbors.index(previous_point_id)
     return neighbors[(previous_index - 1) % len(neighbors)]
 
 
-def _map_polygon_segments_to_geometry(
+def _edge_lookup_by_points(geometry: GeometryModel) -> dict[tuple[tuple[int, int], tuple[int, int]], str]:
+    point_by_id = {point.id: point for point in geometry.points}
+    lookup: dict[tuple[tuple[int, int], tuple[int, int]], str] = {}
+    for edge in geometry.edges:
+        lookup[_canonical_segment_key(_point_xy(point_by_id[edge.start_point_id]), _point_xy(point_by_id[edge.end_point_id]))] = edge.id
+    return lookup
+
+
+def _point_lookup_by_coordinates(point_by_id: dict[str, GeometryPoint]) -> dict[tuple[int, int], str]:
+    return {_coord_key(_point_xy(point)): point_id for point_id, point in point_by_id.items()}
+
+
+def _map_polygon_coords_to_geometry(
     coords: list[tuple[float, float]],
-    geometry: GeometryModel,
-    point_by_id: dict[str, GeometryPoint],
-    edge_by_id: dict[str, GeometryEdge],
+    point_lookup: dict[tuple[int, int], str],
+    edge_lookup: dict[tuple[tuple[int, int], tuple[int, int]], str],
 ) -> tuple[list[str], list[str]]:
     if len(coords) < 4:
-        raise ValueError("闭合面生成失败：polygonize 返回了无效边界。")
-
+        raise ValueError("polygonize returned invalid face")
     unique_coords = coords[:-1]
     point_ids: list[str] = []
     edge_ids: list[str] = []
-    point_id_by_coord = _point_ids_by_coordinate(point_by_id)
-    edge_lookup = _edge_lookup_by_endpoint_coordinates(geometry, point_by_id)
-
     for coord in unique_coords:
-        point_id = _point_id_for_coordinate(coord, point_id_by_coord)
+        point_id = point_lookup.get(_coord_key(coord))
         if point_id is None:
-            raise ValueError(
-                "闭合面生成失败：polygonize 生成的顶点无法映射到原始几何点。"
-                " 检测到未节点化共线边，请在交点处拆分边后再生成闭合面。"
-            )
+            raise ValueError("面顶点无法映射到原始几何点，请检查是否仍有未节点化边。")
         point_ids.append(point_id)
-
     for index, start_coord in enumerate(unique_coords):
         end_coord = unique_coords[(index + 1) % len(unique_coords)]
         edge_id = edge_lookup.get(_canonical_segment_key(start_coord, end_coord))
         if edge_id is None:
-            raise ValueError(
-                "闭合面生成失败：面边界段无法映射到原始几何边。"
-                " 请检查是否存在未节点化交叉或重叠边。"
-            )
+            raise ValueError("面边界段无法映射到原始几何边，请检查是否存在重叠边。")
         edge_ids.append(edge_id)
     return point_ids, edge_ids
 
 
-def _point_ids_by_coordinate(point_by_id: dict[str, GeometryPoint]) -> dict[tuple[int, int], str]:
-    mapping: dict[tuple[int, int], str] = {}
-    for point_id, point in point_by_id.items():
-        mapping[_coord_key((point.x, point.y))] = point_id
-    return mapping
-
-
-def _edge_lookup_by_endpoint_coordinates(
-    geometry: GeometryModel,
-    point_by_id: dict[str, GeometryPoint],
-) -> dict[tuple[tuple[int, int], tuple[int, int]], str]:
-    lookup: dict[tuple[tuple[int, int], tuple[int, int]], str] = {}
-    for edge in geometry.edges:
-        start_xy = _point_xy(point_by_id[edge.start_point_id])
-        end_xy = _point_xy(point_by_id[edge.end_point_id])
-        lookup[_canonical_segment_key(start_xy, end_xy)] = edge.id
-    return lookup
-
-
-def _point_id_for_coordinate(
-    coord: tuple[float, float],
-    point_id_by_coord: dict[tuple[int, int], str],
-) -> str | None:
-    return point_id_by_coord.get(_coord_key(coord))
-
-
 def _find_duplicate_edges(geometry: GeometryModel) -> list[dict[str, object]]:
-    grouped_edge_ids_by_endpoint_pair: dict[frozenset[str], list[str]] = defaultdict(list)
+    grouped: dict[frozenset[str], list[str]] = defaultdict(list)
     for edge in geometry.edges:
-        endpoint_pair = frozenset((edge.start_point_id, edge.end_point_id))
-        grouped_edge_ids_by_endpoint_pair[endpoint_pair].append(edge.id)
+        grouped[frozenset((edge.start_point_id, edge.end_point_id))].append(edge.id)
     return [
         {"point_ids": sorted(endpoint_pair), "edge_ids": edge_ids}
-        for endpoint_pair, edge_ids in grouped_edge_ids_by_endpoint_pair.items()
+        for endpoint_pair, edge_ids in grouped.items()
         if len(edge_ids) > 1
     ]
 
@@ -643,7 +704,6 @@ def _find_pairwise_edge_issues(
                 other_edge.start_point_id,
                 other_edge.end_point_id,
             }
-
             overlap_kind = _collinear_overlap_kind(a1, a2, b1, b2)
             if overlap_kind is not None:
                 issues.append(
@@ -654,7 +714,6 @@ def _find_pairwise_edge_issues(
                     }
                 )
                 continue
-
             intersection = _segment_intersection_point(a1, a2, b1, b2)
             if intersection is None:
                 continue
@@ -670,37 +729,18 @@ def _find_pairwise_edge_issues(
     return issues
 
 
-def _shared_endpoint_intersection_ok(
-    intersection: tuple[float, float],
-    a1: tuple[float, float],
-    a2: tuple[float, float],
-    b1: tuple[float, float],
-    b2: tuple[float, float],
-    shared_point_ids: set[str],
-) -> bool:
-    if not shared_point_ids:
-        return False
-    return (
-        _same_xy(intersection, a1) or _same_xy(intersection, a2)
-    ) and (
-        _same_xy(intersection, b1) or _same_xy(intersection, b2)
-    )
-
-
 def _collinear_overlap_kind(
     a1: tuple[float, float],
     a2: tuple[float, float],
     b1: tuple[float, float],
     b2: tuple[float, float],
 ) -> str | None:
-    if abs(_orientation(a1, a2, b1)) > _EPS or abs(_orientation(a1, a2, b2)) > _EPS:
+    if abs(_orientation(a1, a2, b1)) > GEOMETRY_TOLERANCE or abs(_orientation(a1, a2, b2)) > GEOMETRY_TOLERANCE:
         return None
-
-    if max(min(a1[0], a2[0]), min(b1[0], b2[0])) > min(max(a1[0], a2[0]), max(b1[0], b2[0])) + _EPS:
+    if max(min(a1[0], a2[0]), min(b1[0], b2[0])) > min(max(a1[0], a2[0]), max(b1[0], b2[0])) + GEOMETRY_TOLERANCE:
         return None
-    if max(min(a1[1], a2[1]), min(b1[1], b2[1])) > min(max(a1[1], a2[1]), max(b1[1], b2[1])) + _EPS:
+    if max(min(a1[1], a2[1]), min(b1[1], b2[1])) > min(max(a1[1], a2[1]), max(b1[1], b2[1])) + GEOMETRY_TOLERANCE:
         return None
-
     shared_endpoints = sum(
         1
         for point_a in (a1, a2)
@@ -744,12 +784,11 @@ def _segment_intersection_point(
     b2: tuple[float, float],
 ) -> tuple[float, float] | None:
     denominator = (a1[0] - a2[0]) * (b1[1] - b2[1]) - (a1[1] - a2[1]) * (b1[0] - b2[0])
-    if abs(denominator) <= _EPS:
+    if abs(denominator) <= GEOMETRY_TOLERANCE:
         for candidate in (a1, a2, b1, b2):
             if _point_on_segment(candidate, a1, a2) and _point_on_segment(candidate, b1, b2):
                 return candidate
         return None
-
     det_a = a1[0] * a2[1] - a1[1] * a2[0]
     det_b = b1[0] * b2[1] - b1[1] * b2[0]
     x = (det_a * (b1[0] - b2[0]) - (a1[0] - a2[0]) * det_b) / denominator
@@ -760,34 +799,23 @@ def _segment_intersection_point(
     return None
 
 
-def _point_on_segment(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> bool:
+def _shared_endpoint_intersection_ok(
+    intersection: tuple[float, float],
+    a1: tuple[float, float],
+    a2: tuple[float, float],
+    b1: tuple[float, float],
+    b2: tuple[float, float],
+    shared_point_ids: set[str],
+) -> bool:
+    if not shared_point_ids:
+        return False
     return (
-        abs(_orientation(start, end, point)) <= _EPS
-        and min(start[0], end[0]) - _EPS <= point[0] <= max(start[0], end[0]) + _EPS
-        and min(start[1], end[1]) - _EPS <= point[1] <= max(start[1], end[1]) + _EPS
+        (_same_xy(intersection, a1) or _same_xy(intersection, a2))
+        and (_same_xy(intersection, b1) or _same_xy(intersection, b2))
     )
 
 
-def _point_on_segment_strict(
-    start: tuple[float, float],
-    point: tuple[float, float],
-    end: tuple[float, float],
-) -> bool:
-    if not _point_on_segment(point, start, end):
-        return False
-    return not (_same_xy(point, start) or _same_xy(point, end))
-
-
-def _canonical_cycle_key(point_ids: list[str]) -> tuple[str, ...]:
-    rotations = [tuple(point_ids[index:] + point_ids[:index]) for index in range(len(point_ids))]
-    reverse_ids = list(reversed(point_ids))
-    reverse_rotations = [
-        tuple(reverse_ids[index:] + reverse_ids[:index]) for index in range(len(reverse_ids))
-    ]
-    return min(rotations + reverse_rotations)
-
-
-def _format_polygonize_failure(diagnostics: dict[str, object], reason: str) -> str:
+def _format_face_failure(diagnostics: dict[str, int], reason: str) -> str:
     return (
         "闭合面生成失败："
         f"{reason}；"
@@ -828,6 +856,29 @@ def _edge_exists_between(geometry: GeometryModel, start_point_id: str, end_point
     return any({edge.start_point_id, edge.end_point_id} == endpoints for edge in geometry.edges)
 
 
+def _clone_geometry(geometry: GeometryModel) -> GeometryModel:
+    return GeometryModel(
+        points=[GeometryPoint(id=point.id, x=point.x, y=point.y) for point in geometry.points],
+        edges=[
+            GeometryEdge(
+                id=edge.id,
+                start_point_id=edge.start_point_id,
+                end_point_id=edge.end_point_id,
+            )
+            for edge in geometry.edges
+        ],
+        faces=[
+            GeometryFace(
+                id=face.id,
+                edge_ids=list(face.edge_ids),
+                point_ids=list(face.point_ids),
+                section_id=face.section_id,
+            )
+            for face in geometry.faces
+        ],
+    )
+
+
 def _connected_components(
     participating_points: set[str],
     adjacency: dict[str, list[tuple[str, str]]],
@@ -851,6 +902,35 @@ def _connected_components(
     return components
 
 
+def _point_on_segment(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> bool:
+    return (
+        abs(_orientation(start, end, point)) <= GEOMETRY_TOLERANCE
+        and min(start[0], end[0]) - GEOMETRY_TOLERANCE <= point[0] <= max(start[0], end[0]) + GEOMETRY_TOLERANCE
+        and min(start[1], end[1]) - GEOMETRY_TOLERANCE <= point[1] <= max(start[1], end[1]) + GEOMETRY_TOLERANCE
+    )
+
+
+def _point_on_segment_strict(
+    start: tuple[float, float],
+    point: tuple[float, float],
+    end: tuple[float, float],
+) -> bool:
+    return _point_on_segment(point, start, end) and not (_same_xy(point, start) or _same_xy(point, end))
+
+
+def _canonical_cycle_key(point_ids: list[str]) -> tuple[str, ...]:
+    rotations = [tuple(point_ids[index:] + point_ids[:index]) for index in range(len(point_ids))]
+    reverse_ids = list(reversed(point_ids))
+    reverse_rotations = [
+        tuple(reverse_ids[index:] + reverse_ids[:index]) for index in range(len(reverse_ids))
+    ]
+    return min(rotations + reverse_rotations)
+
+
+def _point_xy(point: GeometryPoint) -> tuple[float, float]:
+    return float(point.x), float(point.y)
+
+
 def _component_sort_key(points: list[tuple[float, float]]) -> tuple[float, float, float, float]:
     xs = [point[0] for point in points]
     ys = [point[1] for point in points]
@@ -869,16 +949,19 @@ def _orientation(a: tuple[float, float], b: tuple[float, float], c: tuple[float,
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 
 
-def _point_xy(point: GeometryPoint) -> tuple[float, float]:
-    return float(point.x), float(point.y)
-
-
 def _same_xy(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    return abs(a[0] - b[0]) <= _EPS and abs(a[1] - b[1]) <= _EPS
+    return abs(a[0] - b[0]) <= GEOMETRY_TOLERANCE and abs(a[1] - b[1]) <= GEOMETRY_TOLERANCE
+
+
+def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.hypot(b[0] - a[0], b[1] - a[1])
 
 
 def _coord_key(coord: tuple[float, float]) -> tuple[int, int]:
-    return (round(coord[0] / _EPS), round(coord[1] / _EPS))
+    return (
+        round(coord[0] / GEOMETRY_TOLERANCE),
+        round(coord[1] / GEOMETRY_TOLERANCE),
+    )
 
 
 def _canonical_segment_key(
