@@ -8,6 +8,46 @@
       "poisson_ratio": 0.3,
       "color": "#8FB7D8",
       "unit_weight": 0.0
+    },
+    {
+      "id": "mat",
+      "name": "A",
+      "young_modulus": 12000000.0,
+      "poisson_ratio": 0.35,
+      "color": "#8FB7D8",
+      "unit_weight": 17800.0
+    },
+    {
+      "id": "mat_2",
+      "name": "B",
+      "young_modulus": 35000000.0,
+      "poisson_ratio": 0.32,
+      "color": "#8FB7D8",
+      "unit_weight": 19500.0
+    },
+    {
+      "id": "mat_3",
+      "name": "C",
+      "young_modulus": 100000000.0,
+      "poisson_ratio": 0.3,
+      "color": "#8FB7D8",
+      "unit_weight": 22200.0
+    },
+    {
+      "id": "mat_4",
+      "name": "D",
+      "young_modulus": 35000000.0,
+      "poisson_ratio": 0.32,
+      "color": "#8FB7D8",
+      "unit_weight": 19300.0
+    },
+    {
+      "id": "mat_5",
+      "name": "E",
+      "young_modulus": 31500000000.0,
+      "poisson_ratio": 0.32,
+      "color": "#8FB7D8",
+      "unit_weight": 24000.0
     }
   ],
   "sections": [
@@ -15,6 +55,41 @@
       "id": "sec_plate",
       "name": "steel_plate_section",
       "material_id": "mat_steel",
+      "thickness": 0.01,
+      "plane_mode": "stress"
+    },
+    {
+      "id": "sec",
+      "name": "A_f3_section",
+      "material_id": "mat",
+      "thickness": 0.01,
+      "plane_mode": "stress"
+    },
+    {
+      "id": "sec_2",
+      "name": "B_f2_section",
+      "material_id": "mat_2",
+      "thickness": 0.01,
+      "plane_mode": "stress"
+    },
+    {
+      "id": "sec_3",
+      "name": "C_f1_section",
+      "material_id": "mat_3",
+      "thickness": 0.01,
+      "plane_mode": "stress"
+    },
+    {
+      "id": "sec_4",
+      "name": "D_f6_section",
+      "material_id": "mat_4",
+      "thickness": 0.01,
+      "plane_mode": "stress"
+    },
+    {
+      "id": "sec_5",
+      "name": "E_f4_section",
+      "material_id": "mat_5",
       "thickness": 0.01,
       "plane_mode": "stress"
     }
@@ -268,7 +343,7 @@
               "p19",
               "p3"
             ],
-            "section_id": ""
+            "section_id": "sec_3"
           },
           {
             "id": "f2",
@@ -284,7 +359,7 @@
               "p7",
               "p6"
             ],
-            "section_id": ""
+            "section_id": "sec_2"
           },
           {
             "id": "f3",
@@ -300,7 +375,7 @@
               "p8",
               "p9"
             ],
-            "section_id": ""
+            "section_id": "sec"
           },
           {
             "id": "f4",
@@ -322,7 +397,7 @@
               "p11",
               "p12"
             ],
-            "section_id": ""
+            "section_id": "sec_5"
           },
           {
             "id": "f5",
@@ -340,7 +415,7 @@
               "p17",
               "p13"
             ],
-            "section_id": ""
+            "section_id": "sec_4"
           },
           {
             "id": "f6",
@@ -356,7 +431,7 @@
               "p16",
               "p15"
             ],
-            "section_id": ""
+            "section_id": "sec_4"
           }
         ]
       },
@@ -373,12 +448,118 @@
       "step_type": "static_linear"
     }
   ],
-  "loads": [],
-  "boundary_conditions": [],
+  "loads": [
+    {
+      "id": "load_1",
+      "name": "载荷_e10",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e10",
+      "load_type": "edge_uniform",
+      "qx": 0.0,
+      "qy": -122000.0,
+      "start_t": 0.25,
+      "end_t": 0.75
+    },
+    {
+      "id": "load_2",
+      "name": "载荷_e20",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e20",
+      "load_type": "edge_uniform",
+      "qx": 0.0,
+      "qy": -122000.0,
+      "start_t": 0.0,
+      "end_t": 0.5
+    }
+  ],
+  "boundary_conditions": [
+    {
+      "id": "bc_1",
+      "name": "约束_e8",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e8",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    },
+    {
+      "id": "bc_2",
+      "name": "约束_e5",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e5",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    },
+    {
+      "id": "bc_3",
+      "name": "约束_e3",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e3",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    },
+    {
+      "id": "bc_4",
+      "name": "约束_e1",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e1",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    },
+    {
+      "id": "bc_5",
+      "name": "约束_e2",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e2",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    },
+    {
+      "id": "bc_6",
+      "name": "约束_e18",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e18",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    },
+    {
+      "id": "bc_7",
+      "name": "约束_e21",
+      "step_id": "step_static",
+      "target_type": "geometry_edge",
+      "target_id": "e21",
+      "ux_fixed": true,
+      "uy_fixed": true,
+      "ux_value": 0.0,
+      "uy_value": 0.0
+    }
+  ],
   "metadata": {
     "mesh_nx": 4,
     "mesh_ny": 2,
     "active_part_id": "part_rectangle",
-    "active_instance_id": ""
+    "active_instance_id": "",
+    "gravity_enabled": true,
+    "gravity_direction_x": 0.0,
+    "gravity_direction_y": -1.0
   }
 }

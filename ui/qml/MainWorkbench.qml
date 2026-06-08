@@ -251,6 +251,39 @@ ApplicationWindow {
         root.repaintViewport()
     }
 
+    function shortSelectionTypeText() {
+        return bridge.selectedGeometryType === "" ? "无" : bridge.selectedGeometryType
+    }
+
+    function shortSelectionNameText() {
+        return bridge.selectedGeometryId === "" ? "未选择" : bridge.selectedGeometryId
+    }
+
+    function shortSelectionDetailText() {
+        if (bridge.selectedGeometryType === "") {
+            return "点击视口中的点、边或闭合面进行选择"
+        }
+        if (bridge.selectedGeometryType === "point") {
+            return "当前为几何点"
+        }
+        if (bridge.selectedGeometryType === "edge") {
+            return "当前为几何边"
+        }
+        return "当前为闭合面"
+    }
+
+    function leftPanelResultStatusText() {
+        return bridge.hasSolution ? "结果：已有" : "结果：暂无"
+    }
+
+    function bottomStatusPrimaryText() {
+        return root.viewportHint === "" ? bridge.statusText : root.viewportHint
+    }
+
+    function bottomStatusSecondaryText() {
+        return "选择：" + root.shortSelectionTypeText() + " / " + root.shortSelectionNameText()
+    }
+
     function syncSelectionSummary() {
         if (bridge.selectedGeometryType === "") {
             clearViewportSelection()
@@ -1735,6 +1768,7 @@ ApplicationWindow {
                         color: "#F8FAFC"
                         border.color: "#D3DCE8"
                         implicitHeight: leftPanelColumn.implicitHeight + 32
+                        clip: true
 
                         ColumnLayout {
                             id: leftPanelColumn
@@ -1771,20 +1805,66 @@ ApplicationWindow {
                             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                             Label { text: "当前选择"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                            Text { Layout.fillWidth: true; text: "类型：" + selectedObjectType; color: "#334155"; wrapMode: Text.WordWrap }
-                            Text { Layout.fillWidth: true; text: "名称：" + selectedObjectName; color: "#334155"; wrapMode: Text.WordWrap }
-                            Text { Layout.fillWidth: true; text: selectedObjectDescription; color: "#64748B"; wrapMode: Text.WordWrap }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 88
+                                radius: 10
+                                color: "#FFFFFF"
+                                border.color: "#D3DCE8"
+                                clip: true
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 4
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "类型：" + root.shortSelectionTypeText()
+                                        color: "#334155"
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "名称：" + root.shortSelectionNameText()
+                                        color: "#334155"
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.shortSelectionDetailText()
+                                        color: "#64748B"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
                             Button { text: "清空选择"; onClicked: root.clearSelection() }
 
                             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                             Label { text: "模型概览"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                            Text { text: "点数：" + bridge.modelPointCount; color: "#334155" }
-                            Text { text: "边数：" + bridge.modelEdgeCount; color: "#334155" }
-                            Text { text: "闭合面数：" + bridge.modelFaceCount; color: "#334155" }
-                            Text { text: "网格节点：" + bridge.sketchMeshNodeCount; color: "#334155" }
-                            Text { text: "网格单元：" + bridge.sketchMeshElementCount; color: "#334155" }
-                            Text { text: "状态：" + bridge.statusText; color: "#64748B"; wrapMode: Text.WordWrap }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 126
+                                radius: 10
+                                color: "#FFFFFF"
+                                border.color: "#D3DCE8"
+                                clip: true
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 4
+
+                                    Text { text: "点：" + bridge.modelPointCount; color: "#334155" }
+                                    Text { text: "边：" + bridge.modelEdgeCount; color: "#334155" }
+                                    Text { text: "面：" + bridge.modelFaceCount; color: "#334155" }
+                                    Text { text: "网格：" + bridge.sketchMeshNodeCount + " 节点 / " + bridge.sketchMeshElementCount + " 单元"; color: "#334155"; elide: Text.ElideRight }
+                                    Text { text: root.leftPanelResultStatusText(); color: "#64748B" }
+                                }
+                            }
                         }
                     }
                 }
@@ -1940,15 +2020,34 @@ ApplicationWindow {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 42
+                            Layout.preferredHeight: 56
                             color: "#FFFFFF"
                             border.color: "#D3DCE8"
+                            clip: true
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 12
                                 anchors.rightMargin: 12
                                 spacing: 10
-                                Label { text: "提示：" + (root.viewportHint === "" ? bridge.statusText : root.viewportHint); color: "#475569"; font.pixelSize: 12 }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: "提示：" + root.bottomStatusPrimaryText()
+                                        color: "#475569"
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: root.bottomStatusSecondaryText()
+                                        color: "#64748B"
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                }
                                 Item { Layout.fillWidth: true }
                                 Label { text: "缩放：" + root.viewportScaleText(); color: "#64748B"; font.pixelSize: 12 }
                             }
