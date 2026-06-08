@@ -24,10 +24,11 @@ class LoadDefinition:
             raise ValueError("LoadDefinition.name must not be empty")
         if not self.step_id:
             raise ValueError("LoadDefinition.step_id must not be empty")
-        if self.target_type not in {"geometry_edge", "geometry_edge_segment", "geometry_point"}:
+        if self.target_type == "geometry_edge_segment":
+            self.target_type = "geometry_edge"
+        if self.target_type not in {"geometry_edge", "geometry_point"}:
             raise ValueError(
-                "LoadDefinition.target_type must be 'geometry_edge', "
-                "'geometry_edge_segment', or 'geometry_point'"
+                "LoadDefinition.target_type must be 'geometry_edge' or 'geometry_point'"
             )
         if not self.target_id:
             raise ValueError("LoadDefinition.target_id must not be empty")
@@ -36,9 +37,13 @@ class LoadDefinition:
                 "LoadDefinition.load_type must be 'edge_uniform' or 'nodal_concentrated'"
             )
         if self.load_type == "nodal_concentrated":
+            if self.target_type != "geometry_point":
+                raise ValueError("Nodal concentrated loads must target geometry_point")
             self.start_t = 0.0
             self.end_t = 1.0
         else:
+            if self.target_type != "geometry_edge":
+                raise ValueError("Edge uniform loads must target geometry_edge")
             start_t = float(self.start_t)
             end_t = float(self.end_t)
             self.start_t = min(start_t, end_t)

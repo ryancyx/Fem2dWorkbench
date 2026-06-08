@@ -56,6 +56,7 @@ class GeometryEdge:
 class GeometryFace:
     id: str
     edge_ids: list[str]
+    point_ids: list[str] = field(default_factory=list)
     section_id: str = ""
 
     def __post_init__(self) -> None:
@@ -63,11 +64,14 @@ class GeometryFace:
             raise ValueError("GeometryFace.id must not be empty")
         if not self.edge_ids:
             raise ValueError("GeometryFace.edge_ids must not be empty")
+        if self.point_ids and len(self.point_ids) < 3:
+            raise ValueError("GeometryFace.point_ids must contain at least 3 points when provided")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "edge_ids": list(self.edge_ids),
+            "point_ids": list(self.point_ids),
             "section_id": self.section_id,
         }
 
@@ -76,6 +80,7 @@ class GeometryFace:
         return cls(
             id=str(data["id"]),
             edge_ids=[str(edge_id) for edge_id in data["edge_ids"]],
+            point_ids=[str(point_id) for point_id in data.get("point_ids", [])],
             section_id=str(data.get("section_id", "") or ""),
         )
 
@@ -100,6 +105,9 @@ class GeometryModel:
             missing_edges = [edge_id for edge_id in face.edge_ids if edge_id not in edge_ids]
             if missing_edges:
                 raise ValueError(f"GeometryFace {face.id!r} references unknown edges: {missing_edges}")
+            missing_points = [point_id for point_id in face.point_ids if point_id not in point_ids]
+            if missing_points:
+                raise ValueError(f"GeometryFace {face.id!r} references unknown points: {missing_points}")
 
     @staticmethod
     def _validate_unique_ids(label: str, ids: list[str]) -> None:
@@ -131,7 +139,7 @@ class GeometryModel:
             GeometryEdge(id="top", start_point_id="p3", end_point_id="p4"),
             GeometryEdge(id="left", start_point_id="p4", end_point_id="p1"),
         ]
-        faces = [GeometryFace(id="face", edge_ids=["bottom", "right", "top", "left"])]
+        faces = [GeometryFace(id="face", edge_ids=["bottom", "right", "top", "left"], point_ids=["p1", "p2", "p3", "p4"])]
         return cls(points=points, edges=edges, faces=faces)
 
     def to_dict(self) -> dict[str, Any]:

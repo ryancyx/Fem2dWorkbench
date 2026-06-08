@@ -2,4 +2,5 @@ PySide6
 numpy
 scipy
 gmsh
+shapely
 pytest

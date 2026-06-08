@@ -66,9 +66,11 @@ from services.assembly_edit_service import (
 from services.compile_service import compile_workbench_project
 from services.export_service import (
     export_deformation_plot_data_json,
+    export_displacement_contour_data_json,
     export_element_results_csv,
     export_node_displacements_csv,
     export_result_summary_txt,
+    export_stress_contour_data_json,
     export_von_mises_contour_data_json,
 )
 from services.face_material_service import assign_material_to_face, get_part_face_material_rows
@@ -102,6 +104,7 @@ from services.result_service import (
     NodeDisplacementRow,
     ResultSummary,
     build_deformation_plot_data,
+    build_displacement_contour_data,
     build_element_result_rows,
     build_node_displacement_rows,
     build_result_summary,
@@ -112,9 +115,9 @@ from services.solve_service import WorkbenchSolveResult, solve_workbench_project
 from services.sketch_geometry_service import (
     add_sketch_edge,
     add_sketch_point,
-    build_single_face_from_edges,
+    build_geometry_diagnostics_text,
     build_faces_from_edges,
-    can_build_single_closed_face,
+    can_build_closed_faces,
     clear_sketch_geometry,
     create_empty_sketch_geometry,
     delete_sketch_edge,
@@ -197,6 +200,7 @@ class WorkbenchBridge(QObject):
         self.geometry_target_id = ""
         self.sketch_node_rows_preview = ""
         self.sketch_edge_rows_preview = ""
+        self.geometry_diagnostics_text = ""
         self.material_options: list[str] = []
         self.material_count = 0
         self.active_part_material_id = ""
@@ -218,12 +222,19 @@ class WorkbenchBridge(QObject):
         self.load_rows_preview = ""
         self.boundary_conditions_json = "[]"
         self.loads_json = "[]"
+        self.edge_load_start_t = 0.0
+        self.edge_load_end_t = 1.0
+        self.edge_load_has_custom_range = False
+        self.edge_load_segment_selection_mode = False
+        self.edge_load_segment_edge_id = ""
+        self.edge_load_segment_first_t = -1.0
         self.result_query_x = 0.0
         self.result_query_y = 0.0
         self.result_query_text = ""
         self.node_rows_json = "[]"
         self.element_rows_json = "[]"
         self.deformation_plot_json = "{}"
+        self.displacement_contour_json = "{}"
         self.stress_contour_json = "{}"
         self.selected_geometry_type = ""
         self.selected_geometry_id = ""
@@ -275,6 +286,10 @@ class WorkbenchBridge(QObject):
     @Property(str, notify=partEditChanged)
     def sketchEdgeRowsPreview(self) -> str:
         return self.sketch_edge_rows_preview
+
+    @Property(str, notify=partEditChanged)
+    def geometryDiagnosticsText(self) -> str:
+        return self.geometry_diagnostics_text
 
     @Property(list, notify=projectChanged)
     def materialOptions(self) -> list[str]:
@@ -363,6 +378,30 @@ class WorkbenchBridge(QObject):
     @Property(str, notify=projectChanged)
     def loadsJson(self) -> str:
         return self.loads_json
+
+    @Property(float, notify=projectChanged)
+    def edgeLoadStartT(self) -> float:
+        return self.edge_load_start_t
+
+    @Property(float, notify=projectChanged)
+    def edgeLoadEndT(self) -> float:
+        return self.edge_load_end_t
+
+    @Property(bool, notify=projectChanged)
+    def hasEdgeLoadSegment(self) -> bool:
+        return self.edge_load_has_custom_range
+
+    @Property(bool, notify=projectChanged)
+    def edgeLoadSegmentSelectionMode(self) -> bool:
+        return self.edge_load_segment_selection_mode
+
+    @Property(str, notify=projectChanged)
+    def edgeLoadSegmentSelectionEdgeId(self) -> str:
+        return self.edge_load_segment_edge_id
+
+    @Property(bool, notify=projectChanged)
+    def edgeLoadSegmentHasFirstPoint(self) -> bool:
+        return self.edge_load_segment_first_t >= 0.0
 
     @Property(str, notify=statusTextChanged)
     def statusText(self) -> str:
@@ -456,6 +495,10 @@ class WorkbenchBridge(QObject):
     @Property(str, notify=resultChanged)
     def deformationPlotJson(self) -> str:
         return self.deformation_plot_json
+
+    @Property(str, notify=resultChanged)
+    def displacementContourJson(self) -> str:
+        return self.displacement_contour_json
 
     @Property(str, notify=resultChanged)
     def stressContourJson(self) -> str:
@@ -1223,16 +1266,16 @@ class WorkbenchBridge(QObject):
         if not self.edge_start_point_id:
             self._set_status_text("请先设置连边起点")
             return False
+        start_point_id = self.edge_start_point_id
+        self.edge_start_point_id = ""
+        self.partEditChanged.emit()
         if not point_id:
             self._set_status_text("终点不能为空")
             return False
-        if point_id == self.edge_start_point_id:
+        if point_id == start_point_id:
             self._set_status_text("连边终点不能与起点相同")
             return False
-        ok = self.addSketchEdge(self.edge_start_point_id, point_id)
-        self.edge_start_point_id = ""
-        self.partEditChanged.emit()
-        return ok
+        return self.addSketchEdge(start_point_id, point_id)
 
     @Slot(result=bool)
     def clearEdgeStartPoint(self) -> bool:
@@ -1450,6 +1493,7 @@ class WorkbenchBridge(QObject):
         try:
             if not self.selectSketchPoint(point_id):
                 return False
+            self.selected_sketch_face_id = ""
             self.geometry_target_type = "point" if point_id else ""
             self.geometry_target_id = str(point_id).strip()
             self.selected_geometry_type = "point" if point_id else ""
@@ -1466,12 +1510,16 @@ class WorkbenchBridge(QObject):
         try:
             if not self.selectSketchEdge(edge_id):
                 return False
+            self.selected_sketch_face_id = ""
             self.geometry_target_type = "edge" if edge_id else ""
             self.geometry_target_id = str(edge_id).strip()
             self.selected_geometry_type = "edge" if edge_id else ""
             self.selected_geometry_id = str(edge_id).strip()
+            if edge_id and self.edge_load_segment_edge_id and self.edge_load_segment_edge_id != edge_id:
+                self._clear_edge_load_segment_range(emit_signal=False)
             self.partEditChanged.emit()
             self.sketchChanged.emit()
+            self.projectChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"选择几何边失败: {exc}")
@@ -1560,16 +1608,24 @@ class WorkbenchBridge(QObject):
         try:
             step_id = self._default_step_id()
             next_id = self._next_definition_id("load", [load.id for load in self.current_project.loads])
+            target_type = "geometry_point" if self.geometry_target_type == "point" else "geometry_edge"
+            start_t = 0.0
+            end_t = 1.0
+            if load_type == "edge_uniform" and self.geometry_target_type == "edge" and self.edge_load_has_custom_range:
+                start_t = self.edge_load_start_t
+                end_t = self.edge_load_end_t
             self.current_project.add_load(
                 LoadDefinition(
                     id=next_id,
                     name=f"载荷_{self.geometry_target_id}",
                     step_id=step_id,
-                    target_type="geometry_point" if self.geometry_target_type == "point" else "geometry_edge",
+                    target_type=target_type,
                     target_id=self.geometry_target_id,
                     load_type=load_type,
                     qx=float(fx_or_qx),
                     qy=float(fy_or_qy),
+                    start_t=start_t,
+                    end_t=end_t,
                 )
             )
             self.project_dirty = True
@@ -1579,6 +1635,83 @@ class WorkbenchBridge(QObject):
             return True
         except Exception as exc:
             self._set_status_text(f"添加载荷失败: {exc}")
+            return False
+
+    @Slot(result=bool)
+    def useFullEdgeLoadRange(self) -> bool:
+        self._clear_edge_load_segment_range(emit_signal=True)
+        self._set_status_text("已设置为整条边均布载荷")
+        return True
+
+    @Slot(float, float, result=bool)
+    def setSelectedEdgeLoadSegmentRange(self, start_t: float, end_t: float) -> bool:
+        if self.geometry_target_type != "edge" or not self.geometry_target_id:
+            self._set_status_text("请先选择一条几何边")
+            return False
+        try:
+            start = float(min(start_t, end_t))
+            end = float(max(start_t, end_t))
+            if start < 0.0 or end > 1.0:
+                raise ValueError("start_t/end_t 必须位于 [0, 1]")
+            if end - start <= 1.0e-9:
+                raise ValueError("载荷区间长度过短")
+            self.edge_load_segment_edge_id = self.geometry_target_id
+            self.edge_load_start_t = start
+            self.edge_load_end_t = end
+            self.edge_load_has_custom_range = True
+            self.edge_load_segment_selection_mode = False
+            self.edge_load_segment_first_t = -1.0
+            self.projectChanged.emit()
+            self._set_status_text(
+                f"已设置局部载荷区间: {self.geometry_target_id} [{start:.4f}, {end:.4f}]"
+            )
+            return True
+        except Exception as exc:
+            self._set_status_text(f"设置载荷区间失败: {exc}")
+            return False
+
+    @Slot(result=bool)
+    def beginEdgeLoadSegmentSelection(self) -> bool:
+        if self.geometry_target_type != "edge" or not self.geometry_target_id:
+            self._set_status_text("请先选择一条几何边")
+            return False
+        self.edge_load_segment_selection_mode = True
+        self.edge_load_segment_edge_id = self.geometry_target_id
+        self.edge_load_segment_first_t = -1.0
+        self.projectChanged.emit()
+        self._set_status_text("已进入局部载荷区间选择模式")
+        return True
+
+    @Slot(result=bool)
+    def cancelEdgeLoadSegmentSelection(self) -> bool:
+        self.edge_load_segment_selection_mode = False
+        self.edge_load_segment_edge_id = ""
+        self.edge_load_segment_first_t = -1.0
+        self.projectChanged.emit()
+        self._set_status_text("已取消局部载荷区间选择")
+        return True
+
+    @Slot(str, float, float, result=bool)
+    def captureEdgeLoadSegmentSelectionPoint(self, edge_id: str, x: float, y: float) -> bool:
+        if not self.edge_load_segment_selection_mode:
+            self._set_status_text("当前未进入局部载荷区间选择模式")
+            return False
+        try:
+            edge_id = str(edge_id).strip()
+            projected_t = self._project_point_to_edge_parameter(edge_id, float(x), float(y))
+            if not self.edge_load_segment_edge_id:
+                self.edge_load_segment_edge_id = edge_id
+            if self.edge_load_segment_edge_id != edge_id:
+                raise ValueError("第二次点击必须仍在同一条边上")
+            if self.edge_load_segment_first_t < 0.0:
+                self.edge_load_segment_first_t = projected_t
+                self.selectGeometryEdge(edge_id)
+                self.projectChanged.emit()
+                self._set_status_text(f"已记录区间起点: {edge_id} t={projected_t:.4f}")
+                return True
+            return self.setSelectedEdgeLoadSegmentRange(self.edge_load_segment_first_t, projected_t)
+        except Exception as exc:
+            self._set_status_text(f"点击设置载荷区间失败: {exc}")
             return False
 
     @Slot(result=bool)
@@ -1832,17 +1965,22 @@ class WorkbenchBridge(QObject):
     def buildSketchFace(self) -> bool:
         try:
             part = self._require_active_part()
+            if self.edge_start_point_id:
+                self.edge_start_point_id = ""
+                self.partEditChanged.emit()
             build_faces_from_edges(part.geometry)
             self.project_dirty = True
+            self.clearSelection()
             self._clear_solution()
             self._clear_sketch_mesh(emit_signal=True)
             self._sync_sketch_from_active_part()
             self._sync_material_state_from_project()
-            self._set_status_text("已生成闭合二维面")
+            self._set_status_text(f"已生成 {len(part.geometry.faces)} 个闭合面")
             self.projectChanged.emit()
             self.resultChanged.emit()
             return True
         except Exception as exc:
+            self._sync_sketch_from_active_part()
             self._set_status_text(f"生成闭合面失败: {exc}")
             return False
 
@@ -1854,7 +1992,6 @@ class WorkbenchBridge(QObject):
         except Exception as exc:
             self._set_status_text(f"生成模型闭合面失败: {exc}")
             return False
-
 
     @Slot(result=bool)
     def clearSketch(self) -> bool:
@@ -2149,11 +2286,65 @@ class WorkbenchBridge(QObject):
                 self.current_solution,
                 output_path / "summary.txt",
             )
+            export_deformation_plot_data_json(
+                self.current_solution,
+                output_path / "deformation_plot_data.json",
+            )
+            export_displacement_contour_data_json(
+                self.current_solution,
+                output_path / "displacement_contour_data.json",
+            )
+            export_stress_contour_data_json(
+                self.current_solution,
+                output_path / "stress_contour_data.json",
+            )
             self._set_status_text(f"结果已导出到 {output_path}")
             return True
         except Exception as exc:
             self._set_status_text(f"导出失败: {exc}")
             return False
+
+    @Slot(str, result=bool)
+    def exportDisplacementContourData(self, output_dir: str = "outputs/latest") -> bool:
+        if self.current_solution is None:
+            self._set_status_text("请先求解后再导出位移云图数据")
+            return False
+
+        try:
+            output_path = Path(output_dir)
+            export_displacement_contour_data_json(
+                self.current_solution,
+                output_path / "displacement_contour_data.json",
+            )
+            self._set_status_text(f"位移云图数据已导出到 {output_path}")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出位移云图数据失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def exportStressContourData(self, output_dir: str = "outputs/latest") -> bool:
+        if self.current_solution is None:
+            self._set_status_text("请先求解后再导出应力云图数据")
+            return False
+
+        try:
+            output_path = Path(output_dir)
+            export_stress_contour_data_json(
+                self.current_solution,
+                output_path / "stress_contour_data.json",
+            )
+            self._set_status_text(f"应力云图数据已导出到 {output_path}")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出应力云图数据失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def exportContourData(self, output_dir: str = "outputs/latest") -> bool:
+        if not self.exportDisplacementContourData(output_dir):
+            return False
+        return self.exportStressContourData(output_dir)
 
     def _require_active_part(self):
         if self.current_project is None:
@@ -2183,6 +2374,9 @@ class WorkbenchBridge(QObject):
         self.result_query_text = ""
         self.node_rows_json = "[]"
         self.element_rows_json = "[]"
+        self.deformation_plot_json = "{}"
+        self.displacement_contour_json = "{}"
+        self.stress_contour_json = "{}"
 
     def _store_solution_rows(self) -> None:
         self.node_rows_json = json.dumps(
@@ -2191,6 +2385,23 @@ class WorkbenchBridge(QObject):
         )
         self.element_rows_json = json.dumps(
             [row.to_dict() for row in self.element_rows],
+            ensure_ascii=False,
+        )
+        if self.current_solution is None:
+            self.deformation_plot_json = "{}"
+            self.displacement_contour_json = "{}"
+            self.stress_contour_json = "{}"
+            return
+        self.deformation_plot_json = json.dumps(
+            build_deformation_plot_data(self.current_solution),
+            ensure_ascii=False,
+        )
+        self.displacement_contour_json = json.dumps(
+            build_displacement_contour_data(self.current_solution),
+            ensure_ascii=False,
+        )
+        self.stress_contour_json = json.dumps(
+            build_stress_contour_data(self.current_solution),
             ensure_ascii=False,
         )
 
@@ -2205,6 +2416,10 @@ class WorkbenchBridge(QObject):
         if reset_load_values:
             self.sketch_load_qx = 0.0
             self.sketch_load_qy = -1000.0
+        self._clear_edge_load_segment_range(emit_signal=False)
+        self.edge_load_segment_selection_mode = False
+        self.edge_load_segment_edge_id = ""
+        self.edge_load_segment_first_t = -1.0
         self.geometry_target_type = ""
         self.geometry_target_id = ""
         self.partEditChanged.emit()
@@ -2291,6 +2506,7 @@ class WorkbenchBridge(QObject):
             self.sketch_edges_preview = ""
             self.sketch_can_build_face = False
             self.sketch_has_face = False
+            self.geometry_diagnostics_text = ""
             self.selected_sketch_point_id = ""
             self.selected_sketch_edge_id = ""
             self.sketch_fixed_edge_id = ""
@@ -2313,6 +2529,7 @@ class WorkbenchBridge(QObject):
             self.sketch_edges_preview = ""
             self.sketch_can_build_face = False
             self.sketch_has_face = False
+            self.geometry_diagnostics_text = ""
             self.selected_sketch_point_id = ""
             self.selected_sketch_edge_id = ""
             self.sketch_fixed_edge_id = ""
@@ -2332,8 +2549,9 @@ class WorkbenchBridge(QObject):
         self.sketch_point_count = len(points)
         self.sketch_edge_count = len(edges)
         self.sketch_face_count = len(faces)
-        self.sketch_can_build_face = can_build_single_closed_face(part.geometry)
+        self.sketch_can_build_face = can_build_closed_faces(part.geometry)
         self.sketch_has_face = self.sketch_face_count > 0
+        self.geometry_diagnostics_text = build_geometry_diagnostics_text(part.geometry)
         point_ids = {point["id"] for point in points}
         edge_ids = {edge["id"] for edge in edges}
         face_ids = {face["id"] for face in faces}
@@ -2349,6 +2567,11 @@ class WorkbenchBridge(QObject):
             self.sketch_fixed_edge_id = ""
         if self.sketch_load_edge_id not in edge_ids:
             self.sketch_load_edge_id = ""
+        if self.edge_load_segment_edge_id and self.edge_load_segment_edge_id not in edge_ids:
+            self._clear_edge_load_segment_range(emit_signal=False)
+            self.edge_load_segment_selection_mode = False
+            self.edge_load_segment_edge_id = ""
+            self.edge_load_segment_first_t = -1.0
         if self.geometry_target_type == "point" and self.geometry_target_id not in point_ids:
             self.geometry_target_type = ""
             self.geometry_target_id = ""
@@ -2473,19 +2696,10 @@ class WorkbenchBridge(QObject):
         )
         face_rows = []
         if self.active_part_id:
-            part = self.current_project.get_part_by_id(self.active_part_id)
-            if part is not None:
-                for face in part.geometry.faces:
-                    face_rows.append({
-                        "face_id": face.id,
-                        "material_id": self.active_part_material_id,
-                        "material_name": self.active_part_material_name,
-                        "material_color": self.active_part_material_color,
-                        "thickness": self.active_part_thickness,
-                        "source": "part",
-                    })
+            face_rows = get_part_face_material_rows(self.current_project, self.active_part_id)
         self.face_material_rows_preview = "\n".join(
-            f"{row['face_id']} | {row['material_name'] or '未指定'} | t={float(row['thickness']):.6g} | {row['source']}"
+            f"{row['face_id']} | {row['material_name'] or '未指定'} | "
+            f"{row['material_color'] or '-'} | t={float(row['thickness']):.6g} | {row['source']}"
             for row in face_rows
         )
         self.active_part_face_material_json = json.dumps(face_rows, ensure_ascii=False)
@@ -2506,6 +2720,7 @@ class WorkbenchBridge(QObject):
         )
         self.load_rows_preview = "\n".join(
             f"{load.id} | {load.load_type} | {load.target_type}:{load.target_id} | "
+            f"start_t={load.start_t:.4f} end_t={load.end_t:.4f} | "
             f"qx={load.qx:.6g} qy={load.qy:.6g}"
             for load in self.current_project.loads
         )
@@ -2536,6 +2751,39 @@ class WorkbenchBridge(QObject):
             if candidate not in used:
                 return candidate
             index += 1
+
+    def _clear_edge_load_segment_range(self, emit_signal: bool) -> None:
+        self.edge_load_start_t = 0.0
+        self.edge_load_end_t = 1.0
+        self.edge_load_has_custom_range = False
+        if emit_signal:
+            self.projectChanged.emit()
+
+    def _project_point_to_edge_parameter(self, edge_id: str, x: float, y: float) -> float:
+        part = self._require_active_part()
+        edge = next((row for row in part.geometry.edges if row.id == edge_id), None)
+        if edge is None:
+            raise ValueError(f"Unknown geometry edge id: {edge_id}")
+        point_by_id = {point.id: point for point in part.geometry.points}
+        start = point_by_id.get(edge.start_point_id)
+        end = point_by_id.get(edge.end_point_id)
+        if start is None or end is None:
+            raise ValueError(f"Geometry edge {edge_id!r} references unknown points")
+        dx = float(end.x) - float(start.x)
+        dy = float(end.y) - float(start.y)
+        length_squared = dx * dx + dy * dy
+        if length_squared <= 1.0e-12:
+            raise ValueError("Geometry edge length is too short")
+        raw_t = ((float(x) - float(start.x)) * dx + (float(y) - float(start.y)) * dy) / length_squared
+        clamped_t = max(0.0, min(1.0, raw_t))
+        projected_x = float(start.x) + dx * clamped_t
+        projected_y = float(start.y) + dy * clamped_t
+        distance = ((float(x) - projected_x) ** 2 + (float(y) - projected_y) ** 2) ** 0.5
+        edge_length = length_squared**0.5
+        tolerance = max(1.0e-6, edge_length * 1.0e-3)
+        if distance > tolerance:
+            raise ValueError("点不在当前边附近")
+        return clamped_t
 
     def _set_status_text(self, text: str) -> None:
         if self._status_text == text:

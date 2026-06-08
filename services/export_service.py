@@ -6,6 +6,7 @@ from pathlib import Path
 
 from services.result_service import (
     build_deformation_plot_data,
+    build_displacement_contour_data,
     build_element_result_rows,
     build_node_displacement_rows,
     build_result_summary,
@@ -38,6 +39,7 @@ def export_element_results_csv(
     fieldnames = [
         "element_id",
         "node_ids",
+        "source_face_id",
         "strain_x",
         "strain_y",
         "strain_xy",
@@ -88,7 +90,19 @@ def export_deformation_plot_data_json(
     )
 
 
-def export_von_mises_contour_data_json(
+def export_displacement_contour_data_json(
+    solution: WorkbenchSolveResult,
+    file_path: str | Path,
+) -> None:
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(build_displacement_contour_data(solution), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def export_stress_contour_data_json(
     solution: WorkbenchSolveResult,
     file_path: str | Path,
 ) -> None:
@@ -98,3 +112,10 @@ def export_von_mises_contour_data_json(
         json.dumps(build_stress_contour_data(solution), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def export_von_mises_contour_data_json(
+    solution: WorkbenchSolveResult,
+    file_path: str | Path,
+) -> None:
+    export_stress_contour_data_json(solution, file_path)

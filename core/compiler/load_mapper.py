@@ -14,8 +14,8 @@ def map_edge_uniform_load_to_nodal_loads(
     thickness: float,
     start_load_id: int,
 ) -> tuple[list[Load], int]:
-    if load.target_type not in {"geometry_edge", "geometry_edge_segment"}:
-        raise ValueError("Only geometry edge loads are supported")
+    if load.target_type != "geometry_edge":
+        raise ValueError("Only geometry_edge edge uniform loads are supported")
     if load.load_type != "edge_uniform":
         raise ValueError("Only load_type='edge_uniform' loads are supported")
     if load.qx == 0.0 and load.qy == 0.0:
@@ -30,8 +30,10 @@ def map_edge_uniform_load_to_nodal_loads(
     if len(mesh_node_ids) < 2 or not element_edges:
         raise ValueError(f"Load {load.id!r} target edge has no mesh element edges")
 
-    start_t = 0.0 if load.target_type == "geometry_edge" else load.start_t
-    end_t = 1.0 if load.target_type == "geometry_edge" else load.end_t
+    start_t = min(float(load.start_t), float(load.end_t))
+    end_t = max(float(load.start_t), float(load.end_t))
+    if start_t < 0.0 or end_t > 1.0:
+        raise ValueError(f"Load {load.id!r} edge segment range must stay within [0, 1]")
     if end_t - start_t <= 1.0e-9:
         raise ValueError(f"Load {load.id!r} target edge segment is too short")
 

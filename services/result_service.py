@@ -173,8 +173,10 @@ def _plane_stress_von_mises(stress_x: float, stress_y: float, stress_xy: float) 
 
 
 def build_deformation_plot_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
+    node_rows = build_node_displacement_rows(solution)
+    max_displacement = max((row.u_magnitude for row in node_rows), default=0.0)
     return {
-        "nodes": [row.to_dict() for row in build_node_displacement_rows(solution)],
+        "nodes": [row.to_dict() for row in node_rows],
         "elements": [
             {
                 "element_id": element.id,
@@ -183,11 +185,102 @@ def build_deformation_plot_data(solution: WorkbenchSolveResult) -> dict[str, Any
             }
             for element in solution.mesh.elements
         ],
+        "summary": {
+            "max_displacement": max_displacement,
+            "default_scale_factor": _estimate_deformation_scale(solution, node_rows, max_displacement),
+        },
+    }
+
+
+def build_displacement_contour_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
+    node_rows = build_node_displacement_rows(solution)
+    displacement_values = [row.u_magnitude for row in node_rows]
+    return {
+        "nodes": [
+            {
+                "id": row.node_id,
+                "x": row.x,
+                "y": row.y,
+                "ux": row.ux,
+                "uy": row.uy,
+                "u": row.u_magnitude,
+            }
+            for row in node_rows
+        ],
+        "elements": [
+            {
+                "id": element.id,
+                "node_ids": list(element.node_ids),
+                "source_face_id": element.source_face_id,
+            }
+            for element in solution.mesh.elements
+        ],
+        "min_displacement": min(displacement_values) if displacement_values else 0.0,
+        "max_displacement": max(displacement_values) if displacement_values else 0.0,
+        "default_scale_factor": _estimate_deformation_scale(
+            solution,
+            node_rows,
+            max(displacement_values) if displacement_values else 0.0,
+        ),
     }
 
 
 def build_stress_contour_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
+    element_rows = build_element_result_rows(solution)
+    nodal_smoothed = _build_smoothed_nodal_von_mises(element_rows)
+    element_von_mises_values = [row.von_mises for row in element_rows]
+    smoothed_values = [nodal_smoothed.get(node.id, 0.0) for node in solution.mesh.nodes]
     return {
-        "nodes": [node.to_dict() for node in solution.mesh.nodes],
-        "elements": [row.to_dict() for row in build_element_result_rows(solution)],
+        "nodes": [
+            {
+                "id": node.id,
+                "x": node.x,
+                "y": node.y,
+                "smoothed_von_mises": nodal_smoothed.get(node.id, 0.0),
+            }
+            for node in solution.mesh.nodes
+        ],
+        "elements": [
+            {
+                "id": row.element_id,
+                "node_ids": list(row.node_ids),
+                "source_face_id": row.source_face_id,
+                "element_von_mises": row.von_mises,
+                "nodal_smoothed_von_mises": [
+                    nodal_smoothed.get(node_id, row.von_mises)
+                    for node_id in row.node_ids
+                ],
+            }
+            for row in element_rows
+        ],
+        "min_von_mises": min(element_von_mises_values) if element_von_mises_values else 0.0,
+        "max_von_mises": max(element_von_mises_values) if element_von_mises_values else 0.0,
+        "min_smoothed_von_mises": min(smoothed_values) if smoothed_values else 0.0,
+        "max_smoothed_von_mises": max(smoothed_values) if smoothed_values else 0.0,
     }
+
+
+def _build_smoothed_nodal_von_mises(
+    element_rows: list[ElementResultRow],
+) -> dict[int, float]:
+    node_id_to_values: dict[int, list[float]] = {}
+    for row in element_rows:
+        for node_id in row.node_ids:
+            node_id_to_values.setdefault(node_id, []).append(row.von_mises)
+    return {
+        node_id: (sum(values) / len(values) if values else 0.0)
+        for node_id, values in node_id_to_values.items()
+    }
+
+
+def _estimate_deformation_scale(
+    solution: WorkbenchSolveResult,
+    node_rows: list[NodeDisplacementRow],
+    max_displacement: float,
+) -> float:
+    if max_displacement <= 1.0e-16 or not solution.mesh.nodes:
+        return 1.0
+    xs = [node.x for node in solution.mesh.nodes]
+    ys = [node.y for node in solution.mesh.nodes]
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+    return max(1.0, 0.15 * span / max_displacement)
