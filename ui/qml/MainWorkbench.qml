@@ -162,6 +162,14 @@ ApplicationWindow {
         }
     }
 
+    function deformationPreviewData() {
+        try {
+            return JSON.parse(bridge.deformationPreviewJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
     function displacementContourData() {
         try {
             return JSON.parse(bridge.displacementContourJson)
@@ -173,6 +181,22 @@ ApplicationWindow {
     function stressContourData() {
         try {
             return JSON.parse(bridge.stressContourJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
+    function stressContourExactData() {
+        try {
+            return JSON.parse(bridge.stressContourExactJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
+    function stressContourSmoothData() {
+        try {
+            return JSON.parse(bridge.stressContourSmoothJson)
         } catch (e) {
             return {}
         }
@@ -282,6 +306,18 @@ ApplicationWindow {
 
     function bottomStatusSecondaryText() {
         return "选择：" + root.shortSelectionTypeText() + " / " + root.shortSelectionNameText()
+    }
+
+    function ensureContourCacheAvailable() {
+        if (!bridge.hasSolution) {
+            root.viewportHint = "请先求解。"
+            return false
+        }
+        if (!bridge.contourCacheValid) {
+            root.viewportHint = "云图缓存已失效，请重新求解。"
+            return false
+        }
+        return true
     }
 
     function syncSelectionSummary() {
@@ -1532,7 +1568,7 @@ ApplicationWindow {
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
         onOpened: {
-            var data = root.deformationPlotData()
+            var data = root.deformationPreviewData()
             deformationScaleField.text = String((data.summary || {}).default_scale_factor || 1.0)
             root.resultOverlayMode = "deformed"
             deformationPlotCanvas.requestPaint()
@@ -1568,7 +1604,7 @@ ApplicationWindow {
                         ctx.clearRect(0, 0, width, height)
                         root.drawContourDialogBackground(ctx, width, height)
 
-                        var data = root.deformationPlotData()
+                        var data = root.deformationPreviewData()
                         var nodes = data.nodes || []
                         var elements = data.elements || []
                         if (nodes.length === 0 || elements.length === 0) {
@@ -1932,8 +1968,9 @@ ApplicationWindow {
                         ctx.clearRect(0, 0, width, height)
                         root.drawContourDialogBackground(ctx, width, height)
 
-                        var data = root.stressContourData()
-                        var nodes = data.nodes || []
+                        var exactMode = stressContourModeCombo.currentIndex === 0
+                        var data = exactMode ? root.stressContourExactData() : root.stressContourSmoothData()
+                        var nodes = exactMode ? meshNodes() : (data.nodes || [])
                         var elements = data.elements || []
                         if (nodes.length === 0 || elements.length === 0) {
                             ctx.fillStyle = "#334155"
@@ -1947,9 +1984,8 @@ ApplicationWindow {
                             nodeMap[nodes[i].id] = nodes[i]
                         }
                         var transform = root.canvasTransformForPoints(nodes, width - 40, height - 40, 32)
-                        var exactMode = stressContourModeCombo.currentIndex === 0
-                        var minValue = exactMode ? Number(data.min_von_mises || 0.0) : Number(data.min_smoothed_von_mises || 0.0)
-                        var maxValue = exactMode ? Number(data.max_von_mises || 0.0) : Number(data.max_smoothed_von_mises || 0.0)
+                        var minValue = Number(data.min_von_mises || 0.0)
+                        var maxValue = Number(data.max_von_mises || 0.0)
 
                         ctx.fillStyle = "#0F172A"
                         ctx.font = "bold 14px 'Microsoft YaHei UI'"
@@ -1967,7 +2003,7 @@ ApplicationWindow {
                                 ctx.lineTo(b.x, b.y)
                                 ctx.lineTo(c.x, c.y)
                                 ctx.closePath()
-                                ctx.fillStyle = root.contourColor(row.element_von_mises, minValue, maxValue, 0.90)
+                                ctx.fillStyle = root.contourColor(row.von_mises, minValue, maxValue, 0.90)
                                 ctx.fill()
                             } else {
                                 a.value = row.nodal_smoothed_von_mises[0]
@@ -2039,16 +2075,16 @@ ApplicationWindow {
                             onPaint: {
                                 var ctx = getContext("2d")
                                 ctx.clearRect(0, 0, width, height)
-                                var data = root.stressContourData()
                                 var exactMode = stressContourModeCombo.currentIndex === 0
+                                var data = exactMode ? root.stressContourExactData() : root.stressContourSmoothData()
                                 root.drawColorLegend(
                                     ctx,
                                     0,
                                     0,
                                     width,
                                     height,
-                                    exactMode ? Number(data.min_von_mises || 0.0) : Number(data.min_smoothed_von_mises || 0.0),
-                                    exactMode ? Number(data.max_von_mises || 0.0) : Number(data.max_smoothed_von_mises || 0.0),
+                                    Number(data.min_von_mises || 0.0),
+                                    Number(data.max_von_mises || 0.0),
                                     "Von Mises",
                                     "Pa"
                                 )
@@ -2057,16 +2093,16 @@ ApplicationWindow {
                         Text {
                             Layout.fillWidth: true
                             text: "Min = " + root.formatScientific(stressContourModeCombo.currentIndex === 0
-                                  ? Number((root.stressContourData().min_von_mises || 0.0))
-                                  : Number((root.stressContourData().min_smoothed_von_mises || 0.0)))
+                                  ? Number((root.stressContourExactData().min_von_mises || 0.0))
+                                  : Number((root.stressContourSmoothData().min_von_mises || 0.0)))
                             color: "#334155"
                             wrapMode: Text.WordWrap
                         }
                         Text {
                             Layout.fillWidth: true
                             text: "Max = " + root.formatScientific(stressContourModeCombo.currentIndex === 0
-                                  ? Number((root.stressContourData().max_von_mises || 0.0))
-                                  : Number((root.stressContourData().max_smoothed_von_mises || 0.0)))
+                                  ? Number((root.stressContourExactData().max_von_mises || 0.0))
+                                  : Number((root.stressContourSmoothData().max_von_mises || 0.0)))
                             color: "#334155"
                             wrapMode: Text.WordWrap
                         }
@@ -2089,8 +2125,8 @@ ApplicationWindow {
                     Label {
                         Layout.fillWidth: true
                         text: stressContourModeCombo.currentIndex === 0
-                              ? "应力云图 | 精确模式（单元常值） | Max = " + root.formatScientific(Number((root.stressContourData().max_von_mises || 0.0)))
-                              : "应力云图 | 平滑模式（节点平均） | Max = " + root.formatScientific(Number((root.stressContourData().max_smoothed_von_mises || 0.0)))
+                              ? "应力云图 | 精确模式（单元常值） | Max = " + root.formatScientific(Number((root.stressContourExactData().max_von_mises || 0.0)))
+                              : "应力云图 | 平滑模式（节点平均） | Max = " + root.formatScientific(Number((root.stressContourSmoothData().max_von_mises || 0.0)))
                         color: "#475569"
                         elide: Text.ElideRight
                     }
@@ -2196,10 +2232,10 @@ ApplicationWindow {
 
                     Item { Layout.fillWidth: true }
 
-                    Button { text: "新建工程"; onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false } }
-                    Button { text: "打开工程"; onClicked: openProjectDialog.open() }
-                    Button { text: "保存工程"; onClicked: root.saveCurrentProjectWithDialogFallback() }
-                    Button { text: "另存为"; onClicked: saveProjectDialog.open() }
+                    Button { text: "新建工程"; enabled: !bridge.isBusy; onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false } }
+                    Button { text: "打开工程"; enabled: !bridge.isBusy; onClicked: openProjectDialog.open() }
+                    Button { text: "保存工程"; enabled: !bridge.isBusy; onClicked: root.saveCurrentProjectWithDialogFallback() }
+                    Button { text: "另存为"; enabled: !bridge.isBusy; onClicked: saveProjectDialog.open() }
                 }
             }
 
@@ -2699,8 +2735,8 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "生成网格"; onClicked: bridge.generateMesh(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
-                                        Button { text: "清除网格"; onClicked: bridge.clearMesh() }
+                                        Button { text: "生成网格"; enabled: !bridge.isBusy; onClicked: bridge.generateMesh(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
+                                        Button { text: "清除网格"; enabled: !bridge.isBusy; onClicked: bridge.clearMesh() }
                                     }
                                     Text { text: "网格后端状态：" + (bridge.currentMeshType === "none" ? "未生成" : bridge.currentMeshType); color: "#334155" }
                                     Text { text: "节点数：" + bridge.sketchMeshNodeCount; color: "#334155" }
@@ -2836,11 +2872,12 @@ ApplicationWindow {
                                     spacing: 8
 
                                     Label { text: "求解结果"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Button { text: "求解当前模型"; onClicked: bridge.solveCurrentModel() }
+                                    Button { text: "求解当前模型"; enabled: !bridge.isBusy; onClicked: bridge.solveCurrentModel() }
                                     Text { text: "求解状态：" + bridge.statusText; color: "#334155"; wrapMode: Text.WordWrap }
                                     Text { text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155" }
                                     Text { text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155" }
                                     Text { text: "Warning 数量：" + bridge.warningCount; color: "#334155" }
+                                    Text { text: "云图缓存：" + (bridge.contourCacheValid ? bridge.contourCacheSummaryText : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
 
                                     RowLayout {
                                         Layout.fillWidth: true
@@ -2848,8 +2885,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示变形示意图"
                                             onClicked: {
-                                                if (!bridge.hasSolution) {
-                                                    root.viewportHint = "请先求解。"
+                                                if (!root.ensureContourCacheAvailable()) {
                                                     return
                                                 }
                                                 deformationPlotDialog.open()
@@ -2858,8 +2894,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示位移云图"
                                             onClicked: {
-                                                if (!bridge.hasSolution) {
-                                                    root.viewportHint = "请先求解。"
+                                                if (!root.ensureContourCacheAvailable()) {
                                                     return
                                                 }
                                                 displacementContourDialog.open()
@@ -2868,8 +2903,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示应力云图"
                                             onClicked: {
-                                                if (!bridge.hasSolution) {
-                                                    root.viewportHint = "请先求解。"
+                                                if (!root.ensureContourCacheAvailable()) {
                                                     return
                                                 }
                                                 stressContourDialog.open()
@@ -2901,6 +2935,70 @@ ApplicationWindow {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        id: busyOverlay
+        anchors.fill: parent
+        visible: bridge.isBusy
+        color: "#66000000"
+        z: 9999
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: busyOverlay.visible
+        }
+
+        Rectangle {
+            width: 420
+            height: 180
+            radius: 12
+            anchors.centerIn: parent
+            color: "#FFFFFF"
+            border.color: "#CBD5E1"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 12
+
+                Label {
+                    text: bridge.busyTitle
+                    font.bold: true
+                    font.pixelSize: 16
+                    color: "#0F172A"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: bridge.busyMessage
+                    wrapMode: Text.WordWrap
+                    color: "#475569"
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 100
+                    value: bridge.busyProgress
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: bridge.busyStage
+                        color: "#64748B"
+                        font.pixelSize: 12
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: bridge.busyProgress + "%"
+                        color: "#0F172A"
+                        font.pixelSize: 12
                     }
                 }
             }

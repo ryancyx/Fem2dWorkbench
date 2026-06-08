@@ -11,7 +11,7 @@ def _use_qt_fallback() -> bool:
 
 if not _use_qt_fallback():
     try:
-        from PySide6.QtCore import QObject, Property, Signal, Slot
+        from PySide6.QtCore import QCoreApplication, QObject, Property, Signal, Slot
     except (ImportError, OSError):
         _USE_FALLBACK = True
     else:
@@ -20,6 +20,11 @@ else:
     _USE_FALLBACK = True
 
 if _USE_FALLBACK:
+
+    class QCoreApplication:
+        @staticmethod
+        def processEvents() -> None:
+            return None
 
     class QObject:
         def __init__(self) -> None:
@@ -45,7 +50,7 @@ if _USE_FALLBACK:
         return decorator
 
 else:
-    from PySide6.QtCore import QObject, Property, Signal, Slot
+    from PySide6.QtCore import QCoreApplication, QObject, Property, Signal, Slot
 
 from core.engineering.boundary_condition_definition import BoundaryConditionDefinition
 from core.engineering.engineering_project import EngineeringProject
@@ -134,6 +139,7 @@ class WorkbenchBridge(QObject):
     resultChanged = Signal()
     projectChanged = Signal()
     projectParametersChanged = Signal()
+    busyStateChanged = Signal()
     partsChanged = Signal()
     instancesChanged = Signal()
     sketchChanged = Signal()
@@ -233,9 +239,19 @@ class WorkbenchBridge(QObject):
         self.result_query_text = ""
         self.node_rows_json = "[]"
         self.element_rows_json = "[]"
+        self.deformation_preview_json = "{}"
         self.deformation_plot_json = "{}"
         self.displacement_contour_json = "{}"
         self.stress_contour_json = "{}"
+        self.stress_contour_exact_json = "{}"
+        self.stress_contour_smooth_json = "{}"
+        self.contour_cache_valid = False
+        self.contour_cache_summary_text = ""
+        self.is_busy = False
+        self.busy_title = ""
+        self.busy_message = ""
+        self.busy_progress = 0
+        self.busy_stage = ""
         self.selected_geometry_type = ""
         self.selected_geometry_id = ""
 
@@ -499,6 +515,10 @@ class WorkbenchBridge(QObject):
         return self.element_rows_json
 
     @Property(str, notify=resultChanged)
+    def deformationPreviewJson(self) -> str:
+        return self.deformation_preview_json
+
+    @Property(str, notify=resultChanged)
     def deformationPlotJson(self) -> str:
         return self.deformation_plot_json
 
@@ -509,6 +529,42 @@ class WorkbenchBridge(QObject):
     @Property(str, notify=resultChanged)
     def stressContourJson(self) -> str:
         return self.stress_contour_json
+
+    @Property(str, notify=resultChanged)
+    def stressContourExactJson(self) -> str:
+        return self.stress_contour_exact_json
+
+    @Property(str, notify=resultChanged)
+    def stressContourSmoothJson(self) -> str:
+        return self.stress_contour_smooth_json
+
+    @Property(bool, notify=resultChanged)
+    def contourCacheValid(self) -> bool:
+        return self.contour_cache_valid
+
+    @Property(str, notify=resultChanged)
+    def contourCacheSummaryText(self) -> str:
+        return self.contour_cache_summary_text
+
+    @Property(bool, notify=busyStateChanged)
+    def isBusy(self) -> bool:
+        return self.is_busy
+
+    @Property(str, notify=busyStateChanged)
+    def busyTitle(self) -> str:
+        return self.busy_title
+
+    @Property(str, notify=busyStateChanged)
+    def busyMessage(self) -> str:
+        return self.busy_message
+
+    @Property(int, notify=busyStateChanged)
+    def busyProgress(self) -> int:
+        return self.busy_progress
+
+    @Property(str, notify=busyStateChanged)
+    def busyStage(self) -> str:
+        return self.busy_stage
 
     @Property(bool, notify=projectChanged)
     def hasProject(self) -> bool:
@@ -862,6 +918,7 @@ class WorkbenchBridge(QObject):
             self._set_status_text("请先创建工程或打开工程")
             return False
 
+        self._begin_busy("正在求解", "准备求解", "solve_prepare", 0)
         try:
             active_part_id = self.active_instance_part_id or self.active_part_id or get_active_part_id(self.current_project)
             if not active_part_id:
@@ -880,6 +937,7 @@ class WorkbenchBridge(QObject):
             self.project_mesh_nx = nx
             self.project_mesh_ny = ny
             self.projectParametersChanged.emit()
+            self._update_busy(15, "编译工程模型", "solve_compile")
             solution = solve_workbench_project(
                 project=self.current_project,
                 part_id=active_part_id,
@@ -887,20 +945,26 @@ class WorkbenchBridge(QObject):
                 nx=nx,
                 ny=ny,
             )
+            self._update_busy(75, "计算节点位移和单元应力", "solve_post")
             self.current_solution = solution
             self.node_rows = build_node_displacement_rows(solution)
             self.element_rows = build_element_result_rows(solution)
             self.summary = build_result_summary(solution)
-            self._store_solution_rows()
+            self._store_solution_rows(progress_callback=self._update_busy)
+            self._update_busy(100, "求解完成", "solve_done")
             gravity_suffix = " | self_weight" if self.gravityEnabled else ""
             self._set_status_text(
-                f"求解完成{gravity_suffix}：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                f"求解完成，云图数据已缓存{gravity_suffix}：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
             self.resultChanged.emit()
             return True
         except Exception as exc:
+            self._clear_solution()
+            self.resultChanged.emit()
             self._set_status_text(f"求解失败: {exc}")
             return False
+        finally:
+            self._finish_busy()
 
     @Slot(str, result=bool)
     def setActivePart(self, part_id: str) -> bool:
@@ -1378,9 +1442,11 @@ class WorkbenchBridge(QObject):
                 unit_weight,
             )
             self.project_dirty = True
+            self._clear_solution()
             self._sync_material_state_from_project()
             self._set_status_text("已更新材料")
             self.projectChanged.emit()
+            self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"更新材料失败: {exc}")
@@ -1394,9 +1460,11 @@ class WorkbenchBridge(QObject):
         try:
             delete_material(self.current_project, material_id)
             self.project_dirty = True
+            self._clear_solution()
             self._sync_material_state_from_project()
             self._set_status_text("已删除材料")
             self.projectChanged.emit()
+            self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"删除材料失败: {exc}")
@@ -1413,10 +1481,12 @@ class WorkbenchBridge(QObject):
         try:
             assign_material_to_part(self.current_project, self.active_part_id, material_id, thickness)
             self.project_dirty = True
+            self._clear_solution()
             self._sync_material_state_from_project()
             self._sync_parameter_cache_from_project()
             self._set_status_text("已应用材料到当前零件")
             self.projectChanged.emit()
+            self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"应用材料失败: {exc}")
@@ -1442,10 +1512,12 @@ class WorkbenchBridge(QObject):
                 thickness,
             )
             self.project_dirty = True
+            self._clear_solution()
             self._sync_material_state_from_project()
             self._sync_parameter_cache_from_project()
             self._set_status_text(f"已应用材料到闭合面 {self.selected_sketch_face_id}")
             self.projectChanged.emit()
+            self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"应用闭合面材料失败: {exc}")
@@ -1462,21 +1534,46 @@ class WorkbenchBridge(QObject):
         max_area: float,
         min_angle: float,
     ) -> bool:
+        return self._generate_quality_mesh_for_active_part(
+            target_size,
+            max_area,
+            min_angle,
+            manage_busy=True,
+        )
+
+    def _generate_quality_mesh_for_active_part(
+        self,
+        target_size: float,
+        max_area: float,
+        min_angle: float,
+        manage_busy: bool,
+    ) -> bool:
+        if manage_busy:
+            self._begin_busy("正在生成网格", "准备生成网格", "mesh_prepare", 0)
         try:
+            self._update_busy(10, "检查几何和闭合面", "mesh_geometry")
             part = self._require_active_part()
+            self._update_busy(20, "检查材料和网格参数", "mesh_parameters")
             resolved_max_area = max_area if max_area > 0.0 else None
+            self._update_busy(30, "调用 Gmsh 生成三角网格", "mesh_generate")
             mesh = generate_quality_sketch_tri_mesh(
                 part.geometry,
                 target_size=target_size,
                 max_area=resolved_max_area,
                 min_angle=min_angle,
             )
+            self._update_busy(70, "读取 Gmsh 网格结果", "mesh_readback")
             self.current_sketch_mesh = mesh
             self.mesh_target_size = float(target_size)
             self.mesh_max_area = float(max_area)
             self.mesh_min_angle = float(min_angle)
             self.current_mesh_type = str(mesh.metadata.get("mesh_type", "sketch_quality"))
+            self._clear_solution()
+            self.resultChanged.emit()
+            self._update_busy(85, "建立几何边界映射", "mesh_mapping")
+            self._update_busy(95, "计算网格质量", "mesh_quality")
             self._sync_sketch_mesh_from_current_mesh()
+            self._update_busy(100, "网格生成完成", "mesh_done")
             self._set_status_text(
                 f"高质量网格生成成功：节点 {self.sketch_mesh_node_count}，单元 {self.sketch_mesh_element_count}"
             )
@@ -1485,10 +1582,15 @@ class WorkbenchBridge(QObject):
             self._clear_sketch_mesh(emit_signal=True)
             self._set_status_text(f"生成高质量网格失败: {exc}")
             return False
+        finally:
+            if manage_busy:
+                self._finish_busy()
 
     @Slot(result=bool)
     def clearCurrentMesh(self) -> bool:
         self._clear_sketch_mesh(emit_signal=True)
+        self._clear_solution()
+        self.resultChanged.emit()
         self._set_status_text("已清除当前网格")
         return True
 
@@ -1563,9 +1665,11 @@ class WorkbenchBridge(QObject):
                 )
             )
             self.project_dirty = True
+            self._clear_solution()
             self._sync_boundary_load_state_from_project()
             self._set_status_text("已添加约束")
             self.projectChanged.emit()
+            self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"添加约束失败: {exc}")
@@ -1582,9 +1686,11 @@ class WorkbenchBridge(QObject):
             return False
         self.current_project.boundary_conditions = []
         self.project_dirty = True
+        self._clear_solution()
         self._sync_boundary_load_state_from_project()
         self._set_status_text("已清除全部约束")
         self.projectChanged.emit()
+        self.resultChanged.emit()
         return True
 
     @Slot(str, result=bool)
@@ -1598,9 +1704,11 @@ class WorkbenchBridge(QObject):
             return False
         self.current_project.boundary_conditions = rows
         self.project_dirty = True
+        self._clear_solution()
         self._sync_boundary_load_state_from_project()
         self._set_status_text("已删除约束")
         self.projectChanged.emit()
+        self.resultChanged.emit()
         return True
 
     @Slot(str, float, float, result=bool)
@@ -1641,9 +1749,11 @@ class WorkbenchBridge(QObject):
                 )
             )
             self.project_dirty = True
+            self._clear_solution()
             self._sync_boundary_load_state_from_project()
             self._set_status_text("已添加载荷")
             self.projectChanged.emit()
+            self.resultChanged.emit()
             return True
         except Exception as exc:
             self._set_status_text(f"添加载荷失败: {exc}")
@@ -1733,9 +1843,11 @@ class WorkbenchBridge(QObject):
             return False
         self.current_project.loads = []
         self.project_dirty = True
+        self._clear_solution()
         self._sync_boundary_load_state_from_project()
         self._set_status_text("已清除全部载荷")
         self.projectChanged.emit()
+        self.resultChanged.emit()
         return True
 
     @Slot(bool, result=bool)
@@ -1765,9 +1877,11 @@ class WorkbenchBridge(QObject):
             return False
         self.current_project.loads = rows
         self.project_dirty = True
+        self._clear_solution()
         self._sync_boundary_load_state_from_project()
         self._set_status_text("已删除载荷")
         self.projectChanged.emit()
+        self.resultChanged.emit()
         return True
 
     @Slot(result=bool)
@@ -1775,7 +1889,9 @@ class WorkbenchBridge(QObject):
         if self.current_project is None:
             self._set_status_text("请先新建或打开工程")
             return False
+        self._begin_busy("正在求解", "准备求解", "solve_prepare", 0)
         try:
+            self._update_busy(5, "检查几何、材料、网格、约束和载荷", "solve_validate")
             part = self._require_active_part()
             edge_ids = {edge.id for edge in part.geometry.edges}
             if {"bottom", "right", "top", "left"}.issubset(edge_ids):
@@ -1791,14 +1907,17 @@ class WorkbenchBridge(QObject):
                 self._set_status_text("求解失败: 当前模型缺少载荷")
                 return False
             if self.current_sketch_mesh is None or self.current_mesh_type != "sketch_quality":
-                if not self.generateQualityMeshForActivePart(
+                self._update_busy(10, "生成求解所需网格", "solve_mesh")
+                if not self._generate_quality_mesh_for_active_part(
                     self.mesh_target_size,
                     self.mesh_max_area,
                     self.mesh_min_angle,
+                    manage_busy=False,
                 ):
                     return False
 
             step_id = self._default_step_id()
+            self._update_busy(15, "编译工程模型", "solve_compile")
             temp_project = EngineeringProject(
                 name=f"{self.current_project.name}_active_model",
                 materials=list(self.current_project.materials),
@@ -1815,7 +1934,11 @@ class WorkbenchBridge(QObject):
                 mesh=self.current_sketch_mesh,
                 step_id=step_id,
             )
+            self._update_busy(30, "组装有限元方程", "solve_assemble")
+            self._update_busy(45, "施加边界条件", "solve_boundary")
+            self._update_busy(60, "求解线性方程组", "solve_linear")
             solver_result = solve_static_linear(compiled_bundle.fem_model)
+            self._update_busy(75, "计算节点位移和单元应力", "solve_post")
             solution = WorkbenchSolveResult(
                 project=temp_project,
                 mesh=self.current_sketch_mesh,
@@ -1827,16 +1950,21 @@ class WorkbenchBridge(QObject):
             self.node_rows = build_node_displacement_rows(solution)
             self.element_rows = build_element_result_rows(solution)
             self.summary = build_result_summary(solution)
-            self._store_solution_rows()
+            self._store_solution_rows(progress_callback=self._update_busy)
+            self._update_busy(100, "求解完成", "solve_done")
             gravity_suffix = " | self_weight" if self.gravityEnabled else ""
             self._set_status_text(
-                f"求解完成{gravity_suffix}：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                f"求解完成，云图数据已缓存{gravity_suffix}：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
             self.resultChanged.emit()
             return True
         except Exception as exc:
+            self._clear_solution()
+            self.resultChanged.emit()
             self._set_status_text(f"求解失败: {exc}")
             return False
+        finally:
+            self._finish_busy()
 
     @Slot(result=bool)
     def clearResults(self) -> bool:
@@ -2197,6 +2325,7 @@ class WorkbenchBridge(QObject):
             self._set_status_text("请先创建工程或打开工程")
             return False
 
+        self._begin_busy("正在求解", "准备求解", "solve_prepare", 0)
         fixed_edge_id = str(fixed_edge_id).strip() or self.sketch_fixed_edge_id
         load_edge_id = str(load_edge_id).strip() or self.sketch_load_edge_id
         if not fixed_edge_id:
@@ -2277,6 +2406,7 @@ class WorkbenchBridge(QObject):
                 mesh=mesh,
                 step_id=step_id,
             )
+            self._update_busy(60, "求解线性方程组", "solve_linear")
             solver_result = solve_static_linear(compiled_bundle.fem_model)
 
             solution = WorkbenchSolveResult(
@@ -2290,17 +2420,22 @@ class WorkbenchBridge(QObject):
             self.node_rows = build_node_displacement_rows(solution)
             self.element_rows = build_element_result_rows(solution)
             self.summary = build_result_summary(solution)
-            self._store_solution_rows()
+            self._store_solution_rows(progress_callback=self._update_busy)
+            self._update_busy(100, "求解完成", "solve_done")
             self._set_status_text(
-                f"草图求解完成：固定边 {fixed_edge_id}，载荷边 {load_edge_id}，"
+                f"草图求解完成，云图数据已缓存：固定边 {fixed_edge_id}，载荷边 {load_edge_id}，"
                 f"节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
             self.sketchChanged.emit()
             self.resultChanged.emit()
             return True
         except Exception as exc:
+            self._clear_solution()
+            self.resultChanged.emit()
             self._set_status_text(f"草图求解失败: {exc}")
             return False
+        finally:
+            self._finish_busy()
 
     @Slot(str, result=bool)
     def exportResults(self, output_dir: str = "outputs/latest") -> bool:
@@ -2378,15 +2513,16 @@ class WorkbenchBridge(QObject):
 
     @Slot(str, result=bool)
     def exportDisplacementContourData(self, output_dir: str = "outputs/latest") -> bool:
-        if self.current_solution is None:
-            self._set_status_text("请先求解后再导出位移云图数据")
+        if not self.contour_cache_valid or self.displacement_contour_json in ("", "{}"):
+            self._set_status_text("云图缓存已失效，请重新求解后再导出位移云图数据")
             return False
 
         try:
             output_path = Path(output_dir)
-            export_displacement_contour_data_json(
-                self.current_solution,
-                output_path / "displacement_contour_data.json",
+            output_path.mkdir(parents=True, exist_ok=True)
+            (output_path / "displacement_contour_data.json").write_text(
+                self.displacement_contour_json,
+                encoding="utf-8",
             )
             self._set_status_text(f"位移云图数据已导出到 {output_path}")
             return True
@@ -2396,15 +2532,16 @@ class WorkbenchBridge(QObject):
 
     @Slot(str, result=bool)
     def exportStressContourData(self, output_dir: str = "outputs/latest") -> bool:
-        if self.current_solution is None:
-            self._set_status_text("请先求解后再导出应力云图数据")
+        if not self.contour_cache_valid or self.stress_contour_json in ("", "{}"):
+            self._set_status_text("云图缓存已失效，请重新求解后再导出应力云图数据")
             return False
 
         try:
             output_path = Path(output_dir)
-            export_stress_contour_data_json(
-                self.current_solution,
-                output_path / "stress_contour_data.json",
+            output_path.mkdir(parents=True, exist_ok=True)
+            (output_path / "stress_contour_data.json").write_text(
+                self.stress_contour_json,
+                encoding="utf-8",
             )
             self._set_status_text(f"应力云图数据已导出到 {output_path}")
             return True
@@ -2436,6 +2573,37 @@ class WorkbenchBridge(QObject):
             part.name = "二维模型"
         return part
 
+    def _process_ui_events(self) -> None:
+        try:
+            QCoreApplication.processEvents()
+        except Exception:
+            return None
+
+    def _set_busy_state(
+        self,
+        active: bool,
+        title: str,
+        message: str,
+        progress: int,
+        stage: str,
+    ) -> None:
+        self.is_busy = bool(active)
+        self.busy_title = str(title)
+        self.busy_message = str(message)
+        self.busy_progress = max(0, min(100, int(progress)))
+        self.busy_stage = str(stage)
+        self.busyStateChanged.emit()
+        self._process_ui_events()
+
+    def _begin_busy(self, title: str, message: str, stage: str, progress: int = 0) -> None:
+        self._set_busy_state(True, title, message, progress, stage)
+
+    def _update_busy(self, progress: int, message: str, stage: str) -> None:
+        self._set_busy_state(True, self.busy_title, message, progress, stage)
+
+    def _finish_busy(self) -> None:
+        self._set_busy_state(False, "", "", 0, "")
+
     def _clear_solution(self) -> None:
         self.current_solution = None
         self.node_rows = []
@@ -2446,11 +2614,16 @@ class WorkbenchBridge(QObject):
         self.result_query_text = ""
         self.node_rows_json = "[]"
         self.element_rows_json = "[]"
+        self.deformation_preview_json = "{}"
         self.deformation_plot_json = "{}"
         self.displacement_contour_json = "{}"
         self.stress_contour_json = "{}"
+        self.stress_contour_exact_json = "{}"
+        self.stress_contour_smooth_json = "{}"
+        self.contour_cache_valid = False
+        self.contour_cache_summary_text = ""
 
-    def _store_solution_rows(self) -> None:
+    def _store_solution_rows(self, progress_callback=None) -> None:
         self.node_rows_json = json.dumps(
             [row.to_dict() for row in self.node_rows],
             ensure_ascii=False,
@@ -2460,22 +2633,71 @@ class WorkbenchBridge(QObject):
             ensure_ascii=False,
         )
         if self.current_solution is None:
+            self.deformation_preview_json = "{}"
             self.deformation_plot_json = "{}"
             self.displacement_contour_json = "{}"
             self.stress_contour_json = "{}"
+            self.stress_contour_exact_json = "{}"
+            self.stress_contour_smooth_json = "{}"
+            self.contour_cache_valid = False
+            self.contour_cache_summary_text = ""
             return
-        self.deformation_plot_json = json.dumps(
-            build_deformation_plot_data(self.current_solution),
-            ensure_ascii=False,
-        )
-        self.displacement_contour_json = json.dumps(
-            build_displacement_contour_data(self.current_solution),
-            ensure_ascii=False,
-        )
-        self.stress_contour_json = json.dumps(
-            build_stress_contour_data(self.current_solution),
-            ensure_ascii=False,
-        )
+        if progress_callback is not None:
+            progress_callback(82, "生成变形示意图数据", "contour_deformation")
+        deformation_data = build_deformation_plot_data(self.current_solution)
+        self.deformation_preview_json = json.dumps(deformation_data, ensure_ascii=False)
+        self.deformation_plot_json = self.deformation_preview_json
+        if progress_callback is not None:
+            progress_callback(88, "生成位移云图数据", "contour_displacement")
+        displacement_data = build_displacement_contour_data(self.current_solution)
+        self.displacement_contour_json = json.dumps(displacement_data, ensure_ascii=False)
+        if progress_callback is not None:
+            progress_callback(94, "生成应力云图数据", "contour_stress")
+        stress_data = build_stress_contour_data(self.current_solution)
+        self.stress_contour_json = json.dumps(stress_data, ensure_ascii=False)
+        stress_exact = {
+            "plot_type": "stress_contour_exact",
+            "title": "Von Mises 应力云图",
+            "mode_label": "精确模式（单元常值）",
+            "scalar_label": str(stress_data.get("scalar_label", "Von Mises")),
+            "unit_label": str(stress_data.get("unit_label", "Pa")),
+            "elements": [
+                {
+                    "id": row["id"],
+                    "node_ids": list(row["node_ids"]),
+                    "source_face_id": row.get("source_face_id"),
+                    "von_mises": row["element_von_mises"],
+                }
+                for row in stress_data.get("elements", [])
+            ],
+            "min_von_mises": float(stress_data.get("min_von_mises", 0.0) or 0.0),
+            "max_von_mises": float(stress_data.get("max_von_mises", 0.0) or 0.0),
+        }
+        stress_smooth = {
+            "plot_type": "stress_contour_smooth",
+            "title": "Von Mises 应力云图",
+            "mode_label": "平滑模式（节点平均）",
+            "scalar_label": str(stress_data.get("scalar_label", "Von Mises")),
+            "unit_label": str(stress_data.get("unit_label", "Pa")),
+            "nodes": list(stress_data.get("nodes", [])),
+            "elements": [
+                {
+                    "id": row["id"],
+                    "node_ids": list(row["node_ids"]),
+                    "source_face_id": row.get("source_face_id"),
+                    "nodal_smoothed_von_mises": list(row["nodal_smoothed_von_mises"]),
+                }
+                for row in stress_data.get("elements", [])
+            ],
+            "min_von_mises": float(stress_data.get("min_smoothed_von_mises", 0.0) or 0.0),
+            "max_von_mises": float(stress_data.get("max_smoothed_von_mises", 0.0) or 0.0),
+        }
+        if progress_callback is not None:
+            progress_callback(98, "写入后处理缓存", "contour_cache")
+        self.stress_contour_exact_json = json.dumps(stress_exact, ensure_ascii=False)
+        self.stress_contour_smooth_json = json.dumps(stress_smooth, ensure_ascii=False)
+        self.contour_cache_valid = True
+        self.contour_cache_summary_text = "云图缓存有效"
 
     def _reset_sketch_boundary_load_state(self, reset_load_values: bool = False) -> None:
         self.selected_sketch_point_id = ""
