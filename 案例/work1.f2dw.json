@@ -1,0 +1,384 @@
+{
+  "name": "single_model_project",
+  "materials": [
+    {
+      "id": "mat_steel",
+      "name": "steel",
+      "young_modulus": 210000000000.0,
+      "poisson_ratio": 0.3,
+      "color": "#8FB7D8",
+      "unit_weight": 0.0
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec_plate",
+      "name": "steel_plate_section",
+      "material_id": "mat_steel",
+      "thickness": 0.01,
+      "plane_mode": "stress"
+    }
+  ],
+  "parts": [
+    {
+      "id": "part_rectangle",
+      "name": "二维模型",
+      "geometry": {
+        "points": [
+          {
+            "id": "p1",
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "id": "p2",
+            "x": 40.0,
+            "y": 0.0
+          },
+          {
+            "id": "p3",
+            "x": 40.0,
+            "y": 5.0
+          },
+          {
+            "id": "p4",
+            "x": 0.0,
+            "y": 5.0
+          },
+          {
+            "id": "p5",
+            "x": 12.0,
+            "y": 5.0
+          },
+          {
+            "id": "p6",
+            "x": 12.0,
+            "y": 7.0
+          },
+          {
+            "id": "p7",
+            "x": 0.0,
+            "y": 7.0
+          },
+          {
+            "id": "p8",
+            "x": 0.0,
+            "y": 9.0
+          },
+          {
+            "id": "p9",
+            "x": 12.0,
+            "y": 9.0
+          },
+          {
+            "id": "p10",
+            "x": 12.4,
+            "y": 9.0
+          },
+          {
+            "id": "p11",
+            "x": 12.4,
+            "y": 2.0
+          },
+          {
+            "id": "p12",
+            "x": 12.0,
+            "y": 2.0
+          },
+          {
+            "id": "p13",
+            "x": 40.0,
+            "y": 7.0
+          },
+          {
+            "id": "p14",
+            "x": 12.4,
+            "y": 5.0
+          },
+          {
+            "id": "p15",
+            "x": 40.0,
+            "y": 9.0
+          },
+          {
+            "id": "p16",
+            "x": 33.0,
+            "y": 9.0
+          },
+          {
+            "id": "p17",
+            "x": 31.0,
+            "y": 7.0
+          },
+          {
+            "id": "p18",
+            "x": 26.0,
+            "y": 7.0
+          },
+          {
+            "id": "p19",
+            "x": 24.0,
+            "y": 5.0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "start_point_id": "p1",
+            "end_point_id": "p2"
+          },
+          {
+            "id": "e2",
+            "start_point_id": "p2",
+            "end_point_id": "p3"
+          },
+          {
+            "id": "e3",
+            "start_point_id": "p1",
+            "end_point_id": "p4"
+          },
+          {
+            "id": "e4",
+            "start_point_id": "p4",
+            "end_point_id": "p5"
+          },
+          {
+            "id": "e5",
+            "start_point_id": "p4",
+            "end_point_id": "p7"
+          },
+          {
+            "id": "e6",
+            "start_point_id": "p5",
+            "end_point_id": "p6"
+          },
+          {
+            "id": "e7",
+            "start_point_id": "p7",
+            "end_point_id": "p6"
+          },
+          {
+            "id": "e8",
+            "start_point_id": "p7",
+            "end_point_id": "p8"
+          },
+          {
+            "id": "e9",
+            "start_point_id": "p6",
+            "end_point_id": "p9"
+          },
+          {
+            "id": "e10",
+            "start_point_id": "p8",
+            "end_point_id": "p9"
+          },
+          {
+            "id": "e11_1",
+            "start_point_id": "p12",
+            "end_point_id": "p5"
+          },
+          {
+            "id": "e12",
+            "start_point_id": "p9",
+            "end_point_id": "p10"
+          },
+          {
+            "id": "e13_1",
+            "start_point_id": "p10",
+            "end_point_id": "p14"
+          },
+          {
+            "id": "e13_2",
+            "start_point_id": "p14",
+            "end_point_id": "p11"
+          },
+          {
+            "id": "e14",
+            "start_point_id": "p11",
+            "end_point_id": "p12"
+          },
+          {
+            "id": "e15_1",
+            "start_point_id": "p14",
+            "end_point_id": "p19"
+          },
+          {
+            "id": "e15_2",
+            "start_point_id": "p19",
+            "end_point_id": "p3"
+          },
+          {
+            "id": "e16",
+            "start_point_id": "p19",
+            "end_point_id": "p18"
+          },
+          {
+            "id": "e17_1",
+            "start_point_id": "p18",
+            "end_point_id": "p17"
+          },
+          {
+            "id": "e17_2",
+            "start_point_id": "p17",
+            "end_point_id": "p13"
+          },
+          {
+            "id": "e18",
+            "start_point_id": "p13",
+            "end_point_id": "p3"
+          },
+          {
+            "id": "e19",
+            "start_point_id": "p17",
+            "end_point_id": "p16"
+          },
+          {
+            "id": "e20",
+            "start_point_id": "p16",
+            "end_point_id": "p15"
+          },
+          {
+            "id": "e21",
+            "start_point_id": "p15",
+            "end_point_id": "p13"
+          }
+        ],
+        "faces": [
+          {
+            "id": "f1",
+            "edge_ids": [
+              "e1",
+              "e3",
+              "e4",
+              "e11_1",
+              "e14",
+              "e13_2",
+              "e15_1",
+              "e15_2",
+              "e2"
+            ],
+            "point_ids": [
+              "p2",
+              "p1",
+              "p4",
+              "p5",
+              "p12",
+              "p11",
+              "p14",
+              "p19",
+              "p3"
+            ],
+            "section_id": ""
+          },
+          {
+            "id": "f2",
+            "edge_ids": [
+              "e4",
+              "e5",
+              "e7",
+              "e6"
+            ],
+            "point_ids": [
+              "p5",
+              "p4",
+              "p7",
+              "p6"
+            ],
+            "section_id": ""
+          },
+          {
+            "id": "f3",
+            "edge_ids": [
+              "e7",
+              "e8",
+              "e10",
+              "e9"
+            ],
+            "point_ids": [
+              "p6",
+              "p7",
+              "p8",
+              "p9"
+            ],
+            "section_id": ""
+          },
+          {
+            "id": "f4",
+            "edge_ids": [
+              "e6",
+              "e9",
+              "e12",
+              "e13_1",
+              "e13_2",
+              "e14",
+              "e11_1"
+            ],
+            "point_ids": [
+              "p5",
+              "p6",
+              "p9",
+              "p10",
+              "p14",
+              "p11",
+              "p12"
+            ],
+            "section_id": ""
+          },
+          {
+            "id": "f5",
+            "edge_ids": [
+              "e15_2",
+              "e16",
+              "e17_1",
+              "e17_2",
+              "e18"
+            ],
+            "point_ids": [
+              "p3",
+              "p19",
+              "p18",
+              "p17",
+              "p13"
+            ],
+            "section_id": ""
+          },
+          {
+            "id": "f6",
+            "edge_ids": [
+              "e17_2",
+              "e19",
+              "e20",
+              "e21"
+            ],
+            "point_ids": [
+              "p13",
+              "p17",
+              "p16",
+              "p15"
+            ],
+            "section_id": ""
+          }
+        ]
+      },
+      "section_id": "sec_plate"
+    }
+  ],
+  "assembly": {
+    "instances": []
+  },
+  "analysis_steps": [
+    {
+      "id": "step_static",
+      "name": "static_step",
+      "step_type": "static_linear"
+    }
+  ],
+  "loads": [],
+  "boundary_conditions": [],
+  "metadata": {
+    "mesh_nx": 4,
+    "mesh_ny": 2,
+    "active_part_id": "part_rectangle",
+    "active_instance_id": ""
+  }
+}

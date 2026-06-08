@@ -2723,7 +2723,7 @@ class WorkbenchBridge(QObject):
         self.active_part_material_color = str(info.get("material_color", "#8FB7D8") or "#8FB7D8")
         self.active_part_thickness = float(info.get("thickness", 0.01) or 0.01)
         self.material_rows_preview = "\n".join(
-            f"{row['id']} | {row['name']} | E={row['young_modulus']:.6g} | "
+            f"{row['id']} | {row['name']} | E={row['young_modulus']:.6g} Pa | "
             f"nu={row['poisson_ratio']:.4g} | γ={float(row.get('unit_weight', 0.0) or 0.0):.6g} N/m³"
             for row in material_rows
         )

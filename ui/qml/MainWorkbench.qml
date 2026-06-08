@@ -1312,10 +1312,25 @@ ApplicationWindow {
                 }
 
                 FormField { id: materialNameField; Layout.fillWidth: true; label: "材料名称"; text: "new_material" }
-                FormField { id: materialEField; Layout.fillWidth: true; label: "弹性模量"; text: "210000000000" }
+                FormField {
+                    id: materialEField
+                    Layout.fillWidth: true
+                    label: "弹性模量 (Pa)"
+                    text: "210000000000"
+                    suffix: "Pa"
+                    placeholderText: "例如 210e9（钢约 210 GPa）"
+                }
                 FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
                 FormField { id: materialUnitWeightField; Layout.fillWidth: true; label: "容重 (N/m³)"; text: "0.0" }
                 FormField { id: materialColorField; Layout.fillWidth: true; label: "颜色"; text: "#8FB7D8" }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "弹性模量当前按 Pa 录入；210 GPa 请填写 210e9 或 210000000000。"
+                    color: "#64748B"
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 12
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
