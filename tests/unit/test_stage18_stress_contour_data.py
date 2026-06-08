@@ -30,11 +30,16 @@ def test_stage18_stress_contour_data_exact_and_smoothed_values(tmp_path: Path) -
     data = build_stress_contour_data(solution)
     assert data["nodes"]
     assert data["elements"]
+    assert data["title"] == "Von Mises 应力云图"
+    assert data["scalar_label"] == "Von Mises"
+    assert data["unit_label"] == "Pa"
 
     first_element = data["elements"][0]
+    assert "von_mises" in first_element
     assert "element_von_mises" in first_element
     assert "nodal_smoothed_von_mises" in first_element
     assert len(first_element["nodal_smoothed_von_mises"]) == 3
+    assert first_element["von_mises"] == first_element["element_von_mises"]
 
     element_values = [row["element_von_mises"] for row in data["elements"]]
     assert data["min_von_mises"] == min(element_values)

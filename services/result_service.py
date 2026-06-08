@@ -176,6 +176,9 @@ def build_deformation_plot_data(solution: WorkbenchSolveResult) -> dict[str, Any
     node_rows = build_node_displacement_rows(solution)
     max_displacement = max((row.u_magnitude for row in node_rows), default=0.0)
     return {
+        "plot_type": "deformation_preview",
+        "title": "变形示意图",
+        "scalar_label": "|u|",
         "nodes": [row.to_dict() for row in node_rows],
         "elements": [
             {
@@ -196,6 +199,10 @@ def build_displacement_contour_data(solution: WorkbenchSolveResult) -> dict[str,
     node_rows = build_node_displacement_rows(solution)
     displacement_values = [row.u_magnitude for row in node_rows]
     return {
+        "plot_type": "displacement_contour",
+        "title": "位移云图",
+        "scalar_label": "位移幅值 |u|",
+        "unit_label": "",
         "nodes": [
             {
                 "id": row.node_id,
@@ -231,6 +238,10 @@ def build_stress_contour_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
     element_von_mises_values = [row.von_mises for row in element_rows]
     smoothed_values = [nodal_smoothed.get(node.id, 0.0) for node in solution.mesh.nodes]
     return {
+        "plot_type": "stress_contour",
+        "title": "Von Mises 应力云图",
+        "scalar_label": "Von Mises",
+        "unit_label": "Pa",
         "nodes": [
             {
                 "id": node.id,
@@ -245,6 +256,7 @@ def build_stress_contour_data(solution: WorkbenchSolveResult) -> dict[str, Any]:
                 "id": row.element_id,
                 "node_ids": list(row.node_ids),
                 "source_face_id": row.source_face_id,
+                "von_mises": row.von_mises,
                 "element_von_mises": row.von_mises,
                 "nodal_smoothed_von_mises": [
                     nodal_smoothed.get(node_id, row.von_mises)

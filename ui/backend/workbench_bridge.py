@@ -2341,6 +2341,42 @@ class WorkbenchBridge(QObject):
             return False
 
     @Slot(str, result=bool)
+    def exportNodeResults(self, output_dir: str = "outputs/latest") -> bool:
+        if self.current_solution is None:
+            self._set_status_text("请先求解后再导出节点结果")
+            return False
+
+        try:
+            output_path = Path(output_dir)
+            export_node_displacements_csv(
+                self.current_solution,
+                output_path / "node_displacements.csv",
+            )
+            self._set_status_text(f"节点结果已导出到 {output_path}")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出节点结果失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def exportElementResults(self, output_dir: str = "outputs/latest") -> bool:
+        if self.current_solution is None:
+            self._set_status_text("请先求解后再导出单元结果")
+            return False
+
+        try:
+            output_path = Path(output_dir)
+            export_element_results_csv(
+                self.current_solution,
+                output_path / "element_results.csv",
+            )
+            self._set_status_text(f"单元结果已导出到 {output_path}")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出单元结果失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
     def exportDisplacementContourData(self, output_dir: str = "outputs/latest") -> bool:
         if self.current_solution is None:
             self._set_status_text("请先求解后再导出位移云图数据")

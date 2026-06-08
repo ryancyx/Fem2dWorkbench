@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import math
 
 from services.export_service import export_displacement_contour_data_json
 from services.project_factory_service import create_rectangle_plate_project
@@ -30,9 +31,13 @@ def test_stage18_displacement_contour_data_and_export(tmp_path: Path) -> None:
     assert data["elements"]
     first_node = data["nodes"][0]
     assert {"ux", "uy", "u"} <= set(first_node)
+    assert first_node["u"] == math.hypot(first_node["ux"], first_node["uy"])
+    assert data["title"] == "位移云图"
+    assert data["scalar_label"] == "位移幅值 |u|"
     displacement_values = [row["u"] for row in data["nodes"]]
     assert data["min_displacement"] == min(displacement_values)
     assert data["max_displacement"] == max(displacement_values)
+    assert data["default_scale_factor"] > 0.0
 
     output_file = tmp_path / "displacement_contour_data.json"
     export_displacement_contour_data_json(solution, output_file)
