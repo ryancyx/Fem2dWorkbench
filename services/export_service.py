@@ -74,7 +74,13 @@ def export_result_summary_txt(
         f"max_von_mises: {summary.max_von_mises}",
         f"max_von_mises_element_id: {summary.max_von_mises_element_id}",
         f"warning_count: {summary.warning_count}",
+        f"gravity_enabled: {bool(solution.project.metadata.get('gravity_enabled', False))}",
+        f"gravity_direction_x: {float(solution.project.metadata.get('gravity_direction_x', 0.0) or 0.0)}",
+        f"gravity_direction_y: {float(solution.project.metadata.get('gravity_direction_y', -1.0) or -1.0)}",
     ]
+    if solution.warnings:
+        lines.append("warnings:")
+        lines.extend(f"- {warning}" for warning in solution.warnings)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

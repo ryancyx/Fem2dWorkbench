@@ -11,6 +11,7 @@ class MaterialDefinition:
     young_modulus: float
     poisson_ratio: float
     color: str = "#808080"
+    unit_weight: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -21,6 +22,8 @@ class MaterialDefinition:
             raise ValueError("MaterialDefinition.young_modulus must be positive")
         if not (-1.0 < self.poisson_ratio < 0.5):
             raise ValueError("MaterialDefinition.poisson_ratio must be between -1.0 and 0.5")
+        if self.unit_weight < 0.0:
+            raise ValueError("MaterialDefinition.unit_weight must be non-negative")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +32,7 @@ class MaterialDefinition:
             "young_modulus": self.young_modulus,
             "poisson_ratio": self.poisson_ratio,
             "color": self.color,
+            "unit_weight": self.unit_weight,
         }
 
     @classmethod
@@ -39,4 +43,5 @@ class MaterialDefinition:
             young_modulus=float(data["young_modulus"]),
             poisson_ratio=float(data["poisson_ratio"]),
             color=str(data.get("color", "#808080")),
+            unit_weight=float(data.get("unit_weight", 0.0) or 0.0),
         )

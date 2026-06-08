@@ -22,6 +22,9 @@ def create_empty_workbench_project(
     project.metadata["mesh_ny"] = 2
     project.metadata["active_part_id"] = ""
     project.metadata["active_instance_id"] = ""
+    project.metadata["gravity_enabled"] = False
+    project.metadata["gravity_direction_x"] = 0.0
+    project.metadata["gravity_direction_y"] = -1.0
     project.add_material(
         MaterialDefinition(
             id="mat_steel",
@@ -29,6 +32,7 @@ def create_empty_workbench_project(
             young_modulus=210e9,
             poisson_ratio=0.3,
             color="#8FB7D8",
+            unit_weight=78500.0,
         )
     )
     project.add_section(
@@ -79,6 +83,9 @@ def create_rectangle_plate_project(
     project.metadata["mesh_nx"] = mesh_nx
     project.metadata["mesh_ny"] = mesh_ny
     project.metadata["active_part_id"] = "part_rectangle"
+    project.metadata["gravity_enabled"] = False
+    project.metadata["gravity_direction_x"] = 0.0
+    project.metadata["gravity_direction_y"] = -1.0
     geometry = GeometryModel.create_rectangle(width=width, height=height)
 
     project.add_material(
@@ -88,6 +95,7 @@ def create_rectangle_plate_project(
             young_modulus=young_modulus,
             poisson_ratio=poisson_ratio,
             color="#8FB7D8",
+            unit_weight=78500.0,
         )
     )
     project.add_section(

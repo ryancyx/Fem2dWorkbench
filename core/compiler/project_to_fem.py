@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core.compiler.bc_mapper import map_boundary_condition_to_constraints
 from core.compiler.compiled_bundle import CompiledFemBundle
+from core.compiler.gravity_load_mapper import map_gravity_load_to_nodal_loads
 from core.compiler.load_mapper import map_edge_uniform_load_to_nodal_loads
 from core.compiler.load_mapper import map_nodal_concentrated_load_to_nodal_loads
 from core.compiler.section_mapper import map_section_to_solver_material
@@ -39,6 +40,8 @@ def compile_project_to_fem(
 
     mesh_node_to_fem_node_id = {node.id: node.id for node in mesh.nodes}
     mesh_element_to_fem_element_id = {element.id: element.id for element in mesh.elements}
+    element_unit_weights: dict[int, float] = {}
+    element_thicknesses: dict[int, float] = {}
 
     fem_model = FEMModel()
     for mesh_node in mesh.nodes:
@@ -52,6 +55,9 @@ def compile_project_to_fem(
 
     for mesh_element in mesh.elements:
         section = _section_for_mesh_element(project, part, mesh_element.source_face_id)
+        material = project.get_material_by_id(section.material_id)
+        if material is None:
+            raise ValueError(f"Section {section.id!r} references unknown material {section.material_id!r}")
         if section.id not in section_mapping:
             solver_material, new_mapping = map_section_to_solver_material(
                 section=section,
@@ -71,6 +77,8 @@ def compile_project_to_fem(
                 element_type=mesh_element.element_type,
             )
         )
+        element_unit_weights[mesh_element.id] = float(material.unit_weight)
+        element_thicknesses[mesh_element.id] = float(section.thickness)
 
     next_constraint_id = 1
     for boundary_condition in project.boundary_conditions:
@@ -116,6 +124,26 @@ def compile_project_to_fem(
         for fem_load in loads:
             fem_model.add_load(fem_load)
 
+    if _gravity_enabled(project):
+        gravity_loads, next_load_id, gravity_stats = map_gravity_load_to_nodal_loads(
+            mesh=mesh,
+            mesh_node_to_fem_node_id=mesh_node_to_fem_node_id,
+            element_unit_weights=element_unit_weights,
+            element_thicknesses=element_thicknesses,
+            start_load_id=next_load_id,
+            direction_x=_gravity_direction(project)[0],
+            direction_y=_gravity_direction(project)[1],
+        )
+        for fem_load in gravity_loads:
+            fem_model.add_load(fem_load)
+        if gravity_stats["active_element_count"] <= 0.0:
+            warnings.append("已启用自重，但所有材料容重为 0。")
+        else:
+            warnings.append(
+                "已启用自重："
+                f"Fx={gravity_stats['total_fx']:.6g}, Fy={gravity_stats['total_fy']:.6g}"
+            )
+
     geometry_edge_to_fem_node_ids = {
         edge_id: [mesh_node_to_fem_node_id[node_id] for node_id in node_ids]
         for edge_id, node_ids in mesh.geometry_edge_to_mesh_node_ids.items()
@@ -137,6 +165,17 @@ def compile_project_to_fem(
         geometry_edge_to_fem_node_ids=geometry_edge_to_fem_node_ids,
         geometry_edge_to_fem_element_edges=geometry_edge_to_fem_element_edges,
         warnings=warnings,
+    )
+
+
+def _gravity_enabled(project: EngineeringProject) -> bool:
+    return bool(project.metadata.get("gravity_enabled", False))
+
+
+def _gravity_direction(project: EngineeringProject) -> tuple[float, float]:
+    return (
+        float(project.metadata.get("gravity_direction_x", 0.0) or 0.0),
+        float(project.metadata.get("gravity_direction_y", -1.0) or -1.0),
     )
 
 

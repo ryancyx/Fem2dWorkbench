@@ -57,8 +57,6 @@ ApplicationWindow {
     property string resultOverlayMode: "none"
     property real leftPanelWidth: 300
     property real rightPanelWidth: 380
-    property bool leftPanelVisible: true
-    property bool rightPanelVisible: true
     property real defaultLeftPanelWidth: 300
     property real defaultRightPanelWidth: 380
     property real minLeftPanelWidth: 240
@@ -67,9 +65,6 @@ ApplicationWindow {
     property real maxLeftPanelWidth: 420
     property real maxRightPanelWidth: 520
     property real splitterWidth: 8
-    property real resizeStartMouseX: 0.0
-    property real resizeStartLeftWidth: 300
-    property real resizeStartRightWidth: 380
 
     component PanelResizeHandle: Item {
         // Drag resizing is intentionally disabled.
@@ -238,24 +233,6 @@ ApplicationWindow {
         }
         root.leftPanelWidth = left
         root.rightPanelWidth = right
-    }
-
-    function resizeLeftPanelBy(delta) {
-        var total = availableWorkspaceWidth()
-        var maxLeftByCenter = total - root.rightPanelWidth - root.minCenterPanelWidth - root.splitterWidth * 2
-        root.leftPanelWidth = Math.max(
-            root.minLeftPanelWidth,
-            Math.min(root.maxLeftPanelWidth, Math.min(maxLeftByCenter, root.resizeStartLeftWidth + delta))
-        )
-    }
-
-    function resizeRightPanelBy(delta) {
-        var total = availableWorkspaceWidth()
-        var maxRightByCenter = total - root.leftPanelWidth - root.minCenterPanelWidth - root.splitterWidth * 2
-        root.rightPanelWidth = Math.max(
-            root.minRightPanelWidth,
-            Math.min(root.maxRightPanelWidth, Math.min(maxRightByCenter, root.resizeStartRightWidth - delta))
-        )
     }
 
     function clearViewportSelection() {
@@ -1294,66 +1271,80 @@ ApplicationWindow {
         id: materialEditorDialog
         title: "材料编辑器"
         modal: true
-        width: 540
-        height: 520
+        parent: Overlay.overlay
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: Math.min(620, root.width - 80)
+        height: Math.min(540, root.height - 80)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
 
-        ColumnLayout {
+        ScrollView {
             anchors.fill: parent
             anchors.margins: 16
-            spacing: 10
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            Label {
-                text: "当前材料"
-                color: "#1F2937"
-                font.pixelSize: 14
-                font.bold: true
-            }
+            ColumnLayout {
+                width: Math.max(0, materialEditorDialog.width - 32)
+                spacing: 10
 
-            TextArea {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 160
-                readOnly: true
-                text: bridge.materialRowsPreview
-                wrapMode: Text.WordWrap
-            }
-
-            ComboBox {
-                id: materialEditCombo
-                Layout.fillWidth: true
-                model: bridge.materialOptions
-            }
-
-            FormField { id: materialNameField; Layout.fillWidth: true; label: "材料名称"; text: "new_material" }
-            FormField { id: materialEField; Layout.fillWidth: true; label: "弹性模量"; text: "210000000000" }
-            FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
-            FormField { id: materialColorField; Layout.fillWidth: true; label: "颜色"; text: "#8FB7D8" }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                PrimaryButton {
-                    text: "新增材料"
-                    onClicked: bridge.addMaterial(
-                        materialNameField.text,
-                        Number(materialEField.text),
-                        Number(materialNuField.text),
-                        materialColorField.text
-                    )
+                Label {
+                    text: "当前材料"
+                    color: "#1F2937"
+                    font.pixelSize: 14
+                    font.bold: true
                 }
-                SecondaryButton {
-                    text: "更新选中"
-                    onClicked: bridge.updateMaterial(
-                        root.parseMaterialIdFromOption(materialEditCombo.currentText),
-                        materialNameField.text,
-                        Number(materialEField.text),
-                        Number(materialNuField.text),
-                        materialColorField.text
-                    )
+
+                TextArea {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 160
+                    readOnly: true
+                    text: bridge.materialRowsPreview
+                    wrapMode: Text.WordWrap
                 }
-                SecondaryButton {
-                    text: "删除选中"
-                    onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(materialEditCombo.currentText))
+
+                ComboBox {
+                    id: materialEditCombo
+                    Layout.fillWidth: true
+                    model: bridge.materialOptions
+                }
+
+                FormField { id: materialNameField; Layout.fillWidth: true; label: "材料名称"; text: "new_material" }
+                FormField { id: materialEField; Layout.fillWidth: true; label: "弹性模量"; text: "210000000000" }
+                FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
+                FormField { id: materialUnitWeightField; Layout.fillWidth: true; label: "容重 (N/m³)"; text: "0.0" }
+                FormField { id: materialColorField; Layout.fillWidth: true; label: "颜色"; text: "#8FB7D8" }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    PrimaryButton {
+                        text: "新增材料"
+                        onClicked: bridge.addMaterial(
+                            materialNameField.text,
+                            Number(materialEField.text),
+                            Number(materialNuField.text),
+                            materialColorField.text,
+                            Number(materialUnitWeightField.text)
+                        )
+                    }
+                    SecondaryButton {
+                        text: "更新选中"
+                        onClicked: bridge.updateMaterial(
+                            root.parseMaterialIdFromOption(materialEditCombo.currentText),
+                            materialNameField.text,
+                            Number(materialEField.text),
+                            Number(materialNuField.text),
+                            materialColorField.text,
+                            Number(materialUnitWeightField.text)
+                        )
+                    }
+                    SecondaryButton {
+                        text: "删除选中"
+                        onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(materialEditCombo.currentText))
+                    }
                 }
             }
         }
@@ -1714,14 +1705,18 @@ ApplicationWindow {
                 spacing: 0
 
                 ScrollView {
+                    id: leftPanelScroll
+                    Layout.minimumWidth: root.leftPanelWidth
                     Layout.preferredWidth: root.leftPanelWidth
+                    Layout.maximumWidth: root.leftPanelWidth
                     Layout.fillHeight: true
                     clip: true
+                    focusPolicy: Qt.NoFocus
                     ScrollBar.vertical.policy: ScrollBar.AlwaysOff
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                     Rectangle {
-                        width: root.leftPanelWidth
+                        width: leftPanelScroll.availableWidth > 0 ? leftPanelScroll.availableWidth : root.leftPanelWidth
                         color: "#F8FAFC"
                         border.color: "#D3DCE8"
                         implicitHeight: leftPanelColumn.implicitHeight + 32
@@ -1953,14 +1948,18 @@ ApplicationWindow {
                 }
 
                 ScrollView {
+                    id: rightPanelScroll
+                    Layout.minimumWidth: root.rightPanelWidth
                     Layout.preferredWidth: root.rightPanelWidth
+                    Layout.maximumWidth: root.rightPanelWidth
                     Layout.fillHeight: true
                     clip: true
+                    focusPolicy: Qt.NoFocus
                     ScrollBar.vertical.policy: ScrollBar.AlwaysOff
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                     Rectangle {
-                        width: root.rightPanelWidth
+                        width: rightPanelScroll.availableWidth > 0 ? rightPanelScroll.availableWidth : root.rightPanelWidth
                         color: "#FFFFFF"
                         border.color: "#D3DCE8"
                         implicitHeight: rightPanelColumn.implicitHeight + 32
@@ -2160,6 +2159,19 @@ ApplicationWindow {
                                         wrapMode: Text.WordWrap
                                         text: bridge.selectedTargetType === "" ? "当前目标：未选择" : "当前目标：" + bridge.selectedTargetType + " | " + bridge.selectedTargetId
                                         color: "#334155"
+                                    }
+
+                                    CheckBox {
+                                        id: gravityEnabledBox
+                                        text: "求解时考虑自重"
+                                        checked: bridge.gravityEnabled
+                                        onToggled: bridge.setGravityEnabled(checked)
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "重力方向：竖直向下"
+                                        color: "#64748B"
+                                        wrapMode: Text.WordWrap
                                     }
 
                                     CheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }

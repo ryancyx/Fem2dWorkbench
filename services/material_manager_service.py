@@ -13,6 +13,7 @@ def list_materials(project: EngineeringProject) -> list[dict]:
             "young_modulus": material.young_modulus,
             "poisson_ratio": material.poisson_ratio,
             "color": material.color,
+            "unit_weight": material.unit_weight,
         }
         for material in project.materials
     ]
@@ -45,6 +46,7 @@ def add_material(
     young_modulus: float,
     poisson_ratio: float,
     color: str,
+    unit_weight: float = 0.0,
 ) -> EngineeringProject:
     material = MaterialDefinition(
         id=create_unique_material_id(project),
@@ -52,6 +54,7 @@ def add_material(
         young_modulus=float(young_modulus),
         poisson_ratio=float(poisson_ratio),
         color=(color or "").strip() or "#808080",
+        unit_weight=float(unit_weight),
     )
     project.add_material(material)
     project.validate_references()
@@ -65,6 +68,7 @@ def update_material(
     young_modulus: float,
     poisson_ratio: float,
     color: str,
+    unit_weight: float = 0.0,
 ) -> EngineeringProject:
     material = project.get_material_by_id(material_id)
     if material is None:
@@ -73,6 +77,7 @@ def update_material(
     material.young_modulus = float(young_modulus)
     material.poisson_ratio = float(poisson_ratio)
     material.color = (color or "").strip() or material.color
+    material.unit_weight = float(unit_weight)
     material.__post_init__()
     project.validate_references()
     return project
@@ -146,6 +151,7 @@ def get_part_material_info(project: EngineeringProject, part_id: str) -> dict:
             "material_id": "",
             "material_name": "",
             "material_color": "",
+            "unit_weight": 0.0,
             "thickness": 0.0,
             "plane_mode": "",
         }
@@ -163,6 +169,7 @@ def get_part_material_info(project: EngineeringProject, part_id: str) -> dict:
         "material_id": material.id,
         "material_name": material.name,
         "material_color": material.color,
+        "unit_weight": material.unit_weight,
         "thickness": section.thickness,
         "plane_mode": section.plane_mode,
     }

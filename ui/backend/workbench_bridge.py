@@ -335,6 +335,12 @@ class WorkbenchBridge(QObject):
     def faceMaterialJson(self) -> str:
         return self.active_part_face_material_json
 
+    @Property(bool, notify=projectChanged)
+    def gravityEnabled(self) -> bool:
+        if self.current_project is None:
+            return False
+        return bool(self.current_project.metadata.get("gravity_enabled", False))
+
     @Property(float, notify=sketchMeshChanged)
     def meshTargetSize(self) -> float:
         return self.mesh_target_size
@@ -886,8 +892,9 @@ class WorkbenchBridge(QObject):
             self.element_rows = build_element_result_rows(solution)
             self.summary = build_result_summary(solution)
             self._store_solution_rows()
+            gravity_suffix = " | self_weight" if self.gravityEnabled else ""
             self._set_status_text(
-                f"求解完成：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                f"求解完成{gravity_suffix}：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
             self.resultChanged.emit()
             return True
@@ -1323,18 +1330,20 @@ class WorkbenchBridge(QObject):
         return False
 
     @Slot(str, float, float, str, result=bool)
+    @Slot(str, float, float, str, float, result=bool)
     def addMaterial(
         self,
         name: str,
         young_modulus: float,
         poisson_ratio: float,
         color: str,
+        unit_weight: float = 0.0,
     ) -> bool:
         if self.current_project is None:
             self._set_status_text("请先新建或打开工程")
             return False
         try:
-            add_material(self.current_project, name, young_modulus, poisson_ratio, color)
+            add_material(self.current_project, name, young_modulus, poisson_ratio, color, unit_weight)
             self.project_dirty = True
             self._sync_material_state_from_project()
             self._set_status_text("已新增材料")
@@ -1345,6 +1354,7 @@ class WorkbenchBridge(QObject):
             return False
 
     @Slot(str, str, float, float, str, result=bool)
+    @Slot(str, str, float, float, str, float, result=bool)
     def updateMaterial(
         self,
         material_id: str,
@@ -1352,6 +1362,7 @@ class WorkbenchBridge(QObject):
         young_modulus: float,
         poisson_ratio: float,
         color: str,
+        unit_weight: float = 0.0,
     ) -> bool:
         if self.current_project is None:
             self._set_status_text("请先新建或打开工程")
@@ -1364,6 +1375,7 @@ class WorkbenchBridge(QObject):
                 young_modulus,
                 poisson_ratio,
                 color,
+                unit_weight,
             )
             self.project_dirty = True
             self._sync_material_state_from_project()
@@ -1726,6 +1738,22 @@ class WorkbenchBridge(QObject):
         self.projectChanged.emit()
         return True
 
+    @Slot(bool, result=bool)
+    def setGravityEnabled(self, enabled: bool) -> bool:
+        if self.current_project is None:
+            self._set_status_text("请先新建或打开工程")
+            return False
+        self.current_project.metadata["gravity_enabled"] = bool(enabled)
+        self.current_project.metadata.setdefault("gravity_direction_x", 0.0)
+        self.current_project.metadata.setdefault("gravity_direction_y", -1.0)
+        self.project_dirty = True
+        self._clear_solution()
+        self._sync_boundary_load_state_from_project()
+        self._set_status_text("已启用自重求解" if enabled else "已关闭自重求解")
+        self.projectChanged.emit()
+        self.resultChanged.emit()
+        return True
+
     @Slot(str, result=bool)
     def deleteLoad(self, load_id: str) -> bool:
         if self.current_project is None:
@@ -1759,7 +1787,7 @@ class WorkbenchBridge(QObject):
             if not self.current_project.boundary_conditions:
                 self._set_status_text("求解失败: 当前模型缺少约束")
                 return False
-            if not self.current_project.loads:
+            if not self.current_project.loads and not self.gravityEnabled:
                 self._set_status_text("求解失败: 当前模型缺少载荷")
                 return False
             if self.current_sketch_mesh is None or self.current_mesh_type != "sketch_quality":
@@ -1800,8 +1828,9 @@ class WorkbenchBridge(QObject):
             self.element_rows = build_element_result_rows(solution)
             self.summary = build_result_summary(solution)
             self._store_solution_rows()
+            gravity_suffix = " | self_weight" if self.gravityEnabled else ""
             self._set_status_text(
-                f"求解完成：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                f"求解完成{gravity_suffix}：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
             )
             self.resultChanged.emit()
             return True
@@ -2694,7 +2723,8 @@ class WorkbenchBridge(QObject):
         self.active_part_material_color = str(info.get("material_color", "#8FB7D8") or "#8FB7D8")
         self.active_part_thickness = float(info.get("thickness", 0.01) or 0.01)
         self.material_rows_preview = "\n".join(
-            f"{row['id']} | {row['name']} | E={row['young_modulus']:.6g} | nu={row['poisson_ratio']:.4g}"
+            f"{row['id']} | {row['name']} | E={row['young_modulus']:.6g} | "
+            f"nu={row['poisson_ratio']:.4g} | γ={float(row.get('unit_weight', 0.0) or 0.0):.6g} N/m³"
             for row in material_rows
         )
         self.section_rows_preview = "\n".join(
@@ -2706,7 +2736,8 @@ class WorkbenchBridge(QObject):
             face_rows = get_part_face_material_rows(self.current_project, self.active_part_id)
         self.face_material_rows_preview = "\n".join(
             f"{row['face_id']} | {row['material_name'] or '未指定'} | "
-            f"{row['material_color'] or '-'} | t={float(row['thickness']):.6g} | {row['source']}"
+            f"{row['material_color'] or '-'} | γ={float(row.get('unit_weight', 0.0) or 0.0):.6g} N/m³ | "
+            f"t={float(row['thickness']):.6g} | {row['source']}"
             for row in face_rows
         )
         self.active_part_face_material_json = json.dumps(face_rows, ensure_ascii=False)
@@ -2731,6 +2762,8 @@ class WorkbenchBridge(QObject):
             f"qx={load.qx:.6g} qy={load.qy:.6g}"
             for load in self.current_project.loads
         )
+        gravity_row = "gravity_enabled=1 | direction=(0,-1)" if self.gravityEnabled else "gravity_enabled=0"
+        self.load_rows_preview = gravity_row if not self.load_rows_preview else gravity_row + "\n" + self.load_rows_preview
         self.boundary_conditions_json = json.dumps(
             [bc.to_dict() for bc in self.current_project.boundary_conditions],
             ensure_ascii=False,
