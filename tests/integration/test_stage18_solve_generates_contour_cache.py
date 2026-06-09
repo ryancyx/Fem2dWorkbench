@@ -65,7 +65,9 @@ def test_stage18_solve_generates_contour_cache() -> None:
     assert bridge.solveCurrentModel(), bridge.statusText
     assert bridge.hasSolution
     assert bridge.contourCacheValid
+    assert bridge.contourImageCacheValid
     assert json.loads(bridge.deformationPreviewJson)
     assert json.loads(bridge.displacementContourJson)
     assert json.loads(bridge.stressContourExactJson)
     assert json.loads(bridge.stressContourSmoothJson)
+    assert json.loads(bridge.contourImageCacheJson)

@@ -16,4 +16,4 @@ def test_stage18_contour_cache_generation_after_solve() -> None:
     assert json.loads(bridge.displacementContourJson)
     assert json.loads(bridge.stressContourExactJson)
     assert json.loads(bridge.stressContourSmoothJson)
-    assert "云图缓存" in bridge.statusText
+    assert "云图数据" in bridge.statusText

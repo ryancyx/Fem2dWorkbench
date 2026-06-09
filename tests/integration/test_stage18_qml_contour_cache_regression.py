@@ -12,6 +12,8 @@ def test_stage18_qml_contour_cache_regression() -> None:
     assert "bridge.displacementContourJson" in qml_text
     assert "bridge.stressContourExactJson" in qml_text
     assert "bridge.stressContourSmoothJson" in qml_text
+    assert "bridge.contourImageCacheJson" in qml_text
+    assert "bridge.contourImageCacheValid" in qml_text
     assert "deformationPlotDialog.open()" in qml_text
     assert "displacementContourDialog.open()" in qml_text
     assert "stressContourDialog.open()" in qml_text

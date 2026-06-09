@@ -12,3 +12,6 @@ def test_stage18_qml_busy_overlay_regression() -> None:
     assert "visible: bridge.isBusy" in qml_text
     assert "text: bridge.busyTitle" in qml_text
     assert "text: bridge.busyMessage" in qml_text
+    assert "indeterminate: bridge.busyIndeterminate" in qml_text
+    assert "bridge.generateMeshAsync" in qml_text
+    assert "bridge.solveCurrentModelAsync" in qml_text

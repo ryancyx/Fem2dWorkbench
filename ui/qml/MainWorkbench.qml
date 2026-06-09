@@ -202,6 +202,14 @@ ApplicationWindow {
         }
     }
 
+    function contourImageCacheMap() {
+        try {
+            return JSON.parse(bridge.contourImageCacheJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
     function fileUrlToLocalPath(fileUrl) {
         var text = fileUrl.toString()
         if (text.indexOf("file:///") === 0) {
@@ -211,6 +219,18 @@ ApplicationWindow {
             return decodeURIComponent(text.substring(7))
         }
         return decodeURIComponent(text)
+    }
+
+    function localPathToFileUrl(path) {
+        var text = String(path || "")
+        if (text === "") {
+            return ""
+        }
+        var normalized = text.replace(/\\/g, "/")
+        if (normalized.indexOf("file:///") === 0) {
+            return normalized
+        }
+        return "file:///" + normalized
     }
 
     function ensureProjectFileSuffix(path) {
@@ -255,8 +275,8 @@ ApplicationWindow {
                 left = Math.max(root.minLeftPanelWidth, left - overflow)
             }
         }
-        root.leftPanelWidth = left
-        root.rightPanelWidth = right
+        root.leftPanelWidth= left
+        root.rightPanelWidth= right
     }
 
     function clearViewportSelection() {
@@ -318,6 +338,46 @@ ApplicationWindow {
             return false
         }
         return true
+    }
+
+    function ensureContourImageCacheAvailable() {
+        if (!root.ensureContourCacheAvailable()) {
+            return false
+        }
+        if (!bridge.contourImageCacheValid) {
+            root.viewportHint = "云图图片缓存已失效，请重新求解。"
+            return false
+        }
+        return true
+    }
+
+    function contourVariantKey(showMesh, showDeformed) {
+        return "grid_" + (showMesh ? "on" : "off") + "_deformed_" + (showDeformed ? "on" : "off")
+    }
+
+    function contourImagePath(groupKey, variantKey) {
+        var imageMap = root.contourImageCacheMap()
+        var group = imageMap[groupKey] || {}
+        return group[variantKey] || ""
+    }
+
+    function deformationPreviewImageSource() {
+        return root.localPathToFileUrl(
+            root.contourImagePath("deformation_preview", root.contourVariantKey(deformationShowMeshBox.checked, deformationShowDeformedBox.checked))
+        )
+    }
+
+    function displacementContourImageSource() {
+        return root.localPathToFileUrl(
+            root.contourImagePath("displacement", root.contourVariantKey(displacementShowMeshBox.checked, displacementShowDeformedBox.checked))
+        )
+    }
+
+    function stressContourImageSource() {
+        var groupKey = stressContourModeCombo.currentIndex === 0 ? "stress_exact" : "stress_smooth"
+        return root.localPathToFileUrl(
+            root.contourImagePath(groupKey, root.contourVariantKey(stressShowMeshBox.checked, stressShowDeformedBox.checked))
+        )
     }
 
     function syncSelectionSummary() {
@@ -1568,10 +1628,7 @@ ApplicationWindow {
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
         onOpened: {
-            var data = root.deformationPreviewData()
-            deformationScaleField.text = String((data.summary || {}).default_scale_factor || 1.0)
             root.resultOverlayMode = "deformed"
-            deformationPlotCanvas.requestPaint()
             root.repaintViewport()
         }
         onClosed: {
@@ -1595,78 +1652,19 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 12
 
-                Canvas {
-                    id: deformationPlotCanvas
+                Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
-                        root.drawContourDialogBackground(ctx, width, height)
+                    radius: 12
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
 
-                        var data = root.deformationPreviewData()
-                        var nodes = data.nodes || []
-                        var elements = data.elements || []
-                        if (nodes.length === 0 || elements.length === 0) {
-                            ctx.fillStyle = "#334155"
-                            ctx.font = "14px 'Microsoft YaHei UI'"
-                            ctx.fillText("请先求解。", 28, 40)
-                            return
-                        }
-
-                        var factor = Number(deformationScaleField.text)
-                        if (!isFinite(factor) || factor <= 0.0) {
-                            factor = 1.0
-                        }
-
-                        var originalPoints = []
-                        var deformedPoints = []
-                        var originalMap = {}
-                        var deformedMap = {}
-                        for (var i = 0; i < nodes.length; i++) {
-                            var node = nodes[i]
-                            var original = { x: node.x, y: node.y }
-                            var deformed = { x: node.x + node.ux * factor, y: node.y + node.uy * factor }
-                            originalPoints.push(original)
-                            deformedPoints.push(deformed)
-                            originalMap[node.node_id] = original
-                            deformedMap[node.node_id] = deformed
-                        }
-
-                        var transform = root.canvasTransformForPoints(originalPoints.concat(deformedPoints), width - 40, height - 40, 32)
-                        ctx.fillStyle = "#0F172A"
-                        ctx.font = "bold 14px 'Microsoft YaHei UI'"
-                        ctx.fillText("变形示意图", 28, 34)
-
-                        for (var j = 0; j < elements.length; j++) {
-                            var ids = elements[j].node_ids
-                            var oa = root.canvasPoint(transform, originalMap[ids[0]])
-                            var ob = root.canvasPoint(transform, originalMap[ids[1]])
-                            var oc = root.canvasPoint(transform, originalMap[ids[2]])
-                            ctx.strokeStyle = "rgba(71, 85, 105, 0.42)"
-                            ctx.lineWidth = 1.0
-                            ctx.beginPath()
-                            ctx.moveTo(oa.x, oa.y)
-                            ctx.lineTo(ob.x, ob.y)
-                            ctx.lineTo(oc.x, oc.y)
-                            ctx.closePath()
-                            ctx.stroke()
-                        }
-
-                        for (var k = 0; k < elements.length; k++) {
-                            var deformedIds = elements[k].node_ids
-                            var da = root.canvasPoint(transform, deformedMap[deformedIds[0]])
-                            var db = root.canvasPoint(transform, deformedMap[deformedIds[1]])
-                            var dc = root.canvasPoint(transform, deformedMap[deformedIds[2]])
-                            ctx.strokeStyle = "#7C3AED"
-                            ctx.lineWidth = 1.35
-                            ctx.beginPath()
-                            ctx.moveTo(da.x, da.y)
-                            ctx.lineTo(db.x, db.y)
-                            ctx.lineTo(dc.x, dc.y)
-                            ctx.closePath()
-                            ctx.stroke()
-                        }
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: root.deformationPreviewImageSource()
                     }
                 }
 
@@ -1683,16 +1681,8 @@ ApplicationWindow {
                         spacing: 10
 
                         Label { text: "显示控制"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        FormField {
-                            id: deformationScaleField
-                            Layout.fillWidth: true
-                            label: "变形放大系数"
-                            text: "1.0"
-                        }
-                        Button {
-                            text: "刷新"
-                            onClicked: deformationPlotCanvas.requestPaint()
-                        }
+                        CheckBox { id: deformationShowMeshBox; text: "显示网格线"; checked: true }
+                        CheckBox { id: deformationShowDeformedBox; text: "显示变形后轮廓"; checked: true }
                         Text {
                             Layout.fillWidth: true
                             text: "Max |u| = " + root.formatScientific(((root.deformationPlotData().summary || {}).max_displacement || 0.0))
@@ -1701,7 +1691,7 @@ ApplicationWindow {
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: "当前放大系数 = " + root.contourScaleText(deformationScaleField.text)
+                            text: "缓存目录：\n" + bridge.contourImageCacheDir
                             color: "#64748B"
                             wrapMode: Text.WordWrap
                         }
@@ -1724,12 +1714,7 @@ ApplicationWindow {
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
-        onOpened: {
-            var data = root.displacementContourData()
-            displacementContourScaleField.text = String(data.default_scale_factor || 1.0)
-            displacementContourCanvas.requestPaint()
-            displacementLegendCanvas.requestPaint()
-        }
+        onOpened: {}
 
         ColumnLayout {
             anchors.fill: parent
@@ -1747,71 +1732,19 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 12
 
-                Canvas {
-                    id: displacementContourCanvas
+                Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
-                        root.drawContourDialogBackground(ctx, width, height)
+                    radius: 12
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
 
-                        var data = root.displacementContourData()
-                        var nodes = data.nodes || []
-                        var elements = data.elements || []
-                        if (nodes.length === 0 || elements.length === 0) {
-                            ctx.fillStyle = "#334155"
-                            ctx.font = "14px 'Microsoft YaHei UI'"
-                            ctx.fillText("请先求解。", 28, 40)
-                            return
-                        }
-
-                        var factor = Number(displacementContourScaleField.text)
-                        if (!isFinite(factor) || factor <= 0.0) {
-                            factor = Number(data.default_scale_factor || 1.0)
-                        }
-                        var useDeformedCoordinates = displacementShowDeformedBox.checked
-                        var nodeMap = {}
-                        var drawPoints = []
-                        for (var i = 0; i < nodes.length; i++) {
-                            var node = nodes[i]
-                            var drawNode = {
-                                x: useDeformedCoordinates ? node.x + node.ux * factor : node.x,
-                                y: useDeformedCoordinates ? node.y + node.uy * factor : node.y,
-                                value: node.u
-                            }
-                            drawPoints.push(drawNode)
-                            nodeMap[node.id] = drawNode
-                        }
-
-                        var transform = root.canvasTransformForPoints(drawPoints, width - 40, height - 40, 32)
-                        var minDisplacement = Number(data.min_displacement || 0.0)
-                        var maxDisplacement = Number(data.max_displacement || 0.0)
-
-                        ctx.fillStyle = "#0F172A"
-                        ctx.font = "bold 14px 'Microsoft YaHei UI'"
-                        ctx.fillText("位移云图", 28, 34)
-
-                        for (var j = 0; j < elements.length; j++) {
-                            var tri = elements[j].node_ids
-                            var a = root.canvasPoint(transform, nodeMap[tri[0]])
-                            var b = root.canvasPoint(transform, nodeMap[tri[1]])
-                            var c = root.canvasPoint(transform, nodeMap[tri[2]])
-                            a.value = nodeMap[tri[0]].value
-                            b.value = nodeMap[tri[1]].value
-                            c.value = nodeMap[tri[2]].value
-                            root.drawInterpolatedTriangleContour(ctx, a, b, c, minDisplacement, maxDisplacement, 12)
-                            if (displacementShowMeshBox.checked) {
-                                ctx.strokeStyle = "rgba(15, 23, 42, 0.28)"
-                                ctx.lineWidth = 0.9
-                                ctx.beginPath()
-                                ctx.moveTo(a.x, a.y)
-                                ctx.lineTo(b.x, b.y)
-                                ctx.lineTo(c.x, c.y)
-                                ctx.closePath()
-                                ctx.stroke()
-                            }
-                        }
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: root.displacementContourImageSource()
                     }
                 }
 
@@ -1828,58 +1761,22 @@ ApplicationWindow {
                         spacing: 10
 
                         Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        FormField {
-                            id: displacementContourScaleField
-                            Layout.fillWidth: true
-                            label: "变形放大系数"
-                            text: "1.0"
-                        }
                         CheckBox {
                             id: displacementShowMeshBox
                             text: "显示网格线"
                             checked: true
-                            onToggled: displacementContourCanvas.requestPaint()
                         }
                         CheckBox {
                             id: displacementShowDeformedBox
                             text: "显示变形后轮廓"
                             checked: true
-                            onToggled: displacementContourCanvas.requestPaint()
                         }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
                             Button {
-                                text: "刷新"
-                                onClicked: {
-                                    displacementContourCanvas.requestPaint()
-                                    displacementLegendCanvas.requestPaint()
-                                }
-                            }
-                            Button {
                                 text: "导出位移云图数据"
                                 onClicked: bridge.exportDisplacementContourData("outputs/latest")
-                            }
-                        }
-                        Canvas {
-                            id: displacementLegendCanvas
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 320
-                            onPaint: {
-                                var ctx = getContext("2d")
-                                ctx.clearRect(0, 0, width, height)
-                                var data = root.displacementContourData()
-                                root.drawColorLegend(
-                                    ctx,
-                                    0,
-                                    0,
-                                    width,
-                                    height,
-                                    Number(data.min_displacement || 0.0),
-                                    Number(data.max_displacement || 0.0),
-                                    "位移幅值 |u|",
-                                    ""
-                                )
                             }
                         }
                         Text {
@@ -1918,7 +1815,7 @@ ApplicationWindow {
                         elide: Text.ElideRight
                     }
                     Label {
-                        text: "Scale = " + root.contourScaleText(displacementContourScaleField.text)
+                        text: "缓存切换"
                         color: "#64748B"
                     }
                 }
@@ -1938,10 +1835,7 @@ ApplicationWindow {
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
-        onOpened: {
-            stressContourCanvas.requestPaint()
-            stressLegendCanvas.requestPaint()
-        }
+        onOpened: {}
 
         ColumnLayout {
             anchors.fill: parent
@@ -1959,69 +1853,19 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 12
 
-                Canvas {
-                    id: stressContourCanvas
+                Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
-                        root.drawContourDialogBackground(ctx, width, height)
+                    radius: 12
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
 
-                        var exactMode = stressContourModeCombo.currentIndex === 0
-                        var data = exactMode ? root.stressContourExactData() : root.stressContourSmoothData()
-                        var nodes = exactMode ? meshNodes() : (data.nodes || [])
-                        var elements = data.elements || []
-                        if (nodes.length === 0 || elements.length === 0) {
-                            ctx.fillStyle = "#334155"
-                            ctx.font = "14px 'Microsoft YaHei UI'"
-                            ctx.fillText("请先求解。", 28, 40)
-                            return
-                        }
-
-                        var nodeMap = {}
-                        for (var i = 0; i < nodes.length; i++) {
-                            nodeMap[nodes[i].id] = nodes[i]
-                        }
-                        var transform = root.canvasTransformForPoints(nodes, width - 40, height - 40, 32)
-                        var minValue = Number(data.min_von_mises || 0.0)
-                        var maxValue = Number(data.max_von_mises || 0.0)
-
-                        ctx.fillStyle = "#0F172A"
-                        ctx.font = "bold 14px 'Microsoft YaHei UI'"
-                        ctx.fillText(exactMode ? "应力云图 | 精确模式（单元常值）" : "应力云图 | 平滑模式（节点平均）", 28, 34)
-
-                        for (var j = 0; j < elements.length; j++) {
-                            var row = elements[j]
-                            var ids = row.node_ids
-                            var a = root.canvasPoint(transform, nodeMap[ids[0]])
-                            var b = root.canvasPoint(transform, nodeMap[ids[1]])
-                            var c = root.canvasPoint(transform, nodeMap[ids[2]])
-                            if (exactMode) {
-                                ctx.beginPath()
-                                ctx.moveTo(a.x, a.y)
-                                ctx.lineTo(b.x, b.y)
-                                ctx.lineTo(c.x, c.y)
-                                ctx.closePath()
-                                ctx.fillStyle = root.contourColor(row.von_mises, minValue, maxValue, 0.90)
-                                ctx.fill()
-                            } else {
-                                a.value = row.nodal_smoothed_von_mises[0]
-                                b.value = row.nodal_smoothed_von_mises[1]
-                                c.value = row.nodal_smoothed_von_mises[2]
-                                root.drawInterpolatedTriangleContour(ctx, a, b, c, minValue, maxValue, 12)
-                            }
-                            if (stressShowMeshBox.checked) {
-                                ctx.strokeStyle = "rgba(15, 23, 42, 0.26)"
-                                ctx.lineWidth = 0.9
-                                ctx.beginPath()
-                                ctx.moveTo(a.x, a.y)
-                                ctx.lineTo(b.x, b.y)
-                                ctx.lineTo(c.x, c.y)
-                                ctx.closePath()
-                                ctx.stroke()
-                            }
-                        }
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: root.stressContourImageSource()
                     }
                 }
 
@@ -2042,52 +1886,23 @@ ApplicationWindow {
                             id: stressContourModeCombo
                             Layout.fillWidth: true
                             model: ["精确模式（单元常值）", "平滑模式（节点平均）"]
-                            onActivated: {
-                                stressContourCanvas.requestPaint()
-                                stressLegendCanvas.requestPaint()
-                            }
                         }
                         CheckBox {
                             id: stressShowMeshBox
                             text: "显示网格线"
                             checked: true
-                            onToggled: stressContourCanvas.requestPaint()
+                        }
+                        CheckBox {
+                            id: stressShowDeformedBox
+                            text: "显示变形后轮廓"
+                            checked: true
                         }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
                             Button {
-                                text: "刷新"
-                                onClicked: {
-                                    stressContourCanvas.requestPaint()
-                                    stressLegendCanvas.requestPaint()
-                                }
-                            }
-                            Button {
                                 text: "导出应力云图数据"
                                 onClicked: bridge.exportStressContourData("outputs/latest")
-                            }
-                        }
-                        Canvas {
-                            id: stressLegendCanvas
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 320
-                            onPaint: {
-                                var ctx = getContext("2d")
-                                ctx.clearRect(0, 0, width, height)
-                                var exactMode = stressContourModeCombo.currentIndex === 0
-                                var data = exactMode ? root.stressContourExactData() : root.stressContourSmoothData()
-                                root.drawColorLegend(
-                                    ctx,
-                                    0,
-                                    0,
-                                    width,
-                                    height,
-                                    Number(data.min_von_mises || 0.0),
-                                    Number(data.max_von_mises || 0.0),
-                                    "Von Mises",
-                                    "Pa"
-                                )
                             }
                         }
                         Text {
@@ -2735,7 +2550,7 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "生成网格"; enabled: !bridge.isBusy; onClicked: bridge.generateMesh(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
+                                        Button { text: "生成网格"; enabled: !bridge.isBusy; onClicked: bridge.generateMeshAsync(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
                                         Button { text: "清除网格"; enabled: !bridge.isBusy; onClicked: bridge.clearMesh() }
                                     }
                                     Text { text: "网格后端状态：" + (bridge.currentMeshType === "none" ? "未生成" : bridge.currentMeshType); color: "#334155" }
@@ -2872,12 +2687,13 @@ ApplicationWindow {
                                     spacing: 8
 
                                     Label { text: "求解结果"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Button { text: "求解当前模型"; enabled: !bridge.isBusy; onClicked: bridge.solveCurrentModel() }
+                                    Button { text: "求解当前模型"; enabled: !bridge.isBusy; onClicked: bridge.solveCurrentModelAsync() }
                                     Text { text: "求解状态：" + bridge.statusText; color: "#334155"; wrapMode: Text.WordWrap }
                                     Text { text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155" }
                                     Text { text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155" }
                                     Text { text: "Warning 数量：" + bridge.warningCount; color: "#334155" }
                                     Text { text: "云图缓存：" + (bridge.contourCacheValid ? bridge.contourCacheSummaryText : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
+                                    Text { text: "图片缓存：" + (bridge.contourImageCacheValid ? bridge.contourImageCacheDir : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
 
                                     RowLayout {
                                         Layout.fillWidth: true
@@ -2885,7 +2701,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示变形示意图"
                                             onClicked: {
-                                                if (!root.ensureContourCacheAvailable()) {
+                                                if (!root.ensureContourImageCacheAvailable()) {
                                                     return
                                                 }
                                                 deformationPlotDialog.open()
@@ -2894,7 +2710,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示位移云图"
                                             onClicked: {
-                                                if (!root.ensureContourCacheAvailable()) {
+                                                if (!root.ensureContourImageCacheAvailable()) {
                                                     return
                                                 }
                                                 displacementContourDialog.open()
@@ -2903,7 +2719,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示应力云图"
                                             onClicked: {
-                                                if (!root.ensureContourCacheAvailable()) {
+                                                if (!root.ensureContourImageCacheAvailable()) {
                                                     return
                                                 }
                                                 stressContourDialog.open()
@@ -2947,6 +2763,15 @@ ApplicationWindow {
         visible: bridge.isBusy
         color: "#66000000"
         z: 9999
+        property real flowOffset: -0.4
+
+        NumberAnimation on flowOffset {
+            running: busyOverlay.visible && bridge.busyIndeterminate
+            loops: Animation.Infinite
+            from: -0.4
+            to: 1.2
+            duration: 1300
+        }
 
         MouseArea {
             anchors.fill: parent
@@ -2985,6 +2810,29 @@ ApplicationWindow {
                     from: 0
                     to: 100
                     value: bridge.busyProgress
+                    indeterminate: bridge.busyIndeterminate
+                    visible: !bridge.busyIndeterminate
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 12
+                    visible: bridge.busyIndeterminate
+                    radius: 6
+                    color: "#E2E8F0"
+                    clip: true
+
+                    Rectangle {
+                        width: parent.width * 0.32
+                        height: parent.height
+                        radius: 6
+                        x: busyOverlay.flowOffset * (parent.width + width) - width
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#93C5FD" }
+                            GradientStop { position: 0.5; color: "#2563EB" }
+                            GradientStop { position: 1.0; color: "#BFDBFE" }
+                        }
+                    }
                 }
 
                 RowLayout {
@@ -2996,7 +2844,7 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: bridge.busyProgress + "%"
+                        text: bridge.busyIndeterminate ? "处理中..." : bridge.busyProgress + "%"
                         color: "#0F172A"
                         font.pixelSize: 12
                     }

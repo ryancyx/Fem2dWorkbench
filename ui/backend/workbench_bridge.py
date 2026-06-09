@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import sys
+import uuid
 
 
 def _use_qt_fallback() -> bool:
@@ -11,7 +13,7 @@ def _use_qt_fallback() -> bool:
 
 if not _use_qt_fallback():
     try:
-        from PySide6.QtCore import QCoreApplication, QObject, Property, Signal, Slot
+        from PySide6.QtCore import QCoreApplication, QObject, Property, QThread, QTimer, Signal, Slot
     except (ImportError, OSError):
         _USE_FALLBACK = True
     else:
@@ -30,11 +32,35 @@ if _USE_FALLBACK:
         def __init__(self) -> None:
             pass
 
-    class _FallbackSignal:
-        def emit(self) -> None:
+    class QThread:
+        def __init__(self) -> None:
             pass
 
-    def Signal() -> _FallbackSignal:
+        def start(self) -> None:
+            return None
+
+        def quit(self) -> None:
+            return None
+
+        def wait(self, _timeout: int | None = None) -> None:
+            return None
+
+        def deleteLater(self) -> None:
+            return None
+
+    class QTimer:
+        @staticmethod
+        def singleShot(_ms: int, callback) -> None:
+            callback()
+
+    class _FallbackSignal:
+        def connect(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def emit(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    def Signal(*_args: object, **_kwargs: object) -> _FallbackSignal:
         return _FallbackSignal()
 
     def Slot(*_types: object, **_kwargs: object):
@@ -50,7 +76,7 @@ if _USE_FALLBACK:
         return decorator
 
 else:
-    from PySide6.QtCore import QCoreApplication, QObject, Property, Signal, Slot
+    from PySide6.QtCore import QCoreApplication, QObject, Property, QThread, QTimer, Signal, Slot
 
 from core.engineering.boundary_condition_definition import BoundaryConditionDefinition
 from core.engineering.engineering_project import EngineeringProject
@@ -69,6 +95,13 @@ from services.assembly_edit_service import (
     set_active_instance,
 )
 from services.compile_service import compile_workbench_project
+from services.contour_cache_service import (
+    build_contour_image_cache_json,
+    cleanup_old_cache_dirs,
+    clear_contour_cache_dir,
+    create_contour_cache_dir,
+    generate_contour_images,
+)
 from services.export_service import (
     export_deformation_plot_data_json,
     export_displacement_contour_data_json,
@@ -132,6 +165,7 @@ from services.sketch_geometry_service import (
     get_sketch_points,
     move_sketch_point,
 )
+from ui.backend.workbench_tasks import FunctionWorker
 
 
 class WorkbenchBridge(QObject):
@@ -247,13 +281,21 @@ class WorkbenchBridge(QObject):
         self.stress_contour_smooth_json = "{}"
         self.contour_cache_valid = False
         self.contour_cache_summary_text = ""
+        self.contour_image_cache_valid = False
+        self.contour_image_cache_dir = ""
+        self.contour_image_cache_json = "{}"
         self.is_busy = False
         self.busy_title = ""
         self.busy_message = ""
         self.busy_progress = 0
+        self.busy_indeterminate = False
         self.busy_stage = ""
         self.selected_geometry_type = ""
         self.selected_geometry_id = ""
+        self._session_cache_id = uuid.uuid4().hex
+        self._active_thread: QThread | None = None
+        self._active_worker: FunctionWorker | None = None
+        cleanup_old_cache_dirs()
 
     @Property(bool, notify=partEditChanged)
     def partEditMode(self) -> bool:
@@ -546,6 +588,18 @@ class WorkbenchBridge(QObject):
     def contourCacheSummaryText(self) -> str:
         return self.contour_cache_summary_text
 
+    @Property(bool, notify=resultChanged)
+    def contourImageCacheValid(self) -> bool:
+        return self.contour_image_cache_valid
+
+    @Property(str, notify=resultChanged)
+    def contourImageCacheDir(self) -> str:
+        return self.contour_image_cache_dir
+
+    @Property(str, notify=resultChanged)
+    def contourImageCacheJson(self) -> str:
+        return self.contour_image_cache_json
+
     @Property(bool, notify=busyStateChanged)
     def isBusy(self) -> bool:
         return self.is_busy
@@ -561,6 +615,10 @@ class WorkbenchBridge(QObject):
     @Property(int, notify=busyStateChanged)
     def busyProgress(self) -> int:
         return self.busy_progress
+
+    @Property(bool, notify=busyStateChanged)
+    def busyIndeterminate(self) -> bool:
+        return self.busy_indeterminate
 
     @Property(str, notify=busyStateChanged)
     def busyStage(self) -> str:
@@ -953,9 +1011,14 @@ class WorkbenchBridge(QObject):
             self._store_solution_rows(progress_callback=self._update_busy)
             self._update_busy(100, "求解完成", "solve_done")
             gravity_suffix = " | self_weight" if self.gravityEnabled else ""
-            self._set_status_text(
-                f"求解完成，云图数据已缓存{gravity_suffix}：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
-            )
+            if self.contour_image_cache_valid:
+                self._set_status_text(
+                    f"求解完成，云图数据和图片缓存已生成{gravity_suffix}：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                )
+            else:
+                self._set_status_text(
+                    f"求解成功，但云图图片缓存生成失败{gravity_suffix}：实例 {self.active_instance_name} / 零件 {active_part_id}，节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                )
             self.resultChanged.emit()
             return True
         except Exception as exc:
@@ -1556,12 +1619,14 @@ class WorkbenchBridge(QObject):
             self._update_busy(20, "检查材料和网格参数", "mesh_parameters")
             resolved_max_area = max_area if max_area > 0.0 else None
             self._update_busy(30, "调用 Gmsh 生成三角网格", "mesh_generate")
+            print("[MESH] before gmsh", flush=True)
             mesh = generate_quality_sketch_tri_mesh(
                 part.geometry,
                 target_size=target_size,
                 max_area=resolved_max_area,
                 min_angle=min_angle,
             )
+            print("[MESH] after gmsh", flush=True)
             self._update_busy(70, "读取 Gmsh 网格结果", "mesh_readback")
             self.current_sketch_mesh = mesh
             self.mesh_target_size = float(target_size)
@@ -1601,6 +1666,15 @@ class WorkbenchBridge(QObject):
     @Slot(float, float, result=bool)
     def generateMesh(self, target_size: float, min_angle: float) -> bool:
         return self.generateQualityMeshForActivePart(target_size, 0.0, min_angle)
+
+    @Slot(float, float, result=bool)
+    def generateMeshAsync(self, target_size: float, min_angle: float) -> bool:
+        if self.is_busy:
+            self._set_status_text("当前任务正在进行，请稍候。")
+            return False
+        self._begin_busy("正在生成网格", "准备生成网格...", "mesh", 0, indeterminate=True)
+        QTimer.singleShot(0, lambda: self._run_generate_mesh_sync_after_overlay(float(target_size), float(min_angle)))
+        return True
 
     @Slot(str, result=bool)
     def selectGeometryPoint(self, point_id: str) -> bool:
@@ -1952,10 +2026,14 @@ class WorkbenchBridge(QObject):
             self.summary = build_result_summary(solution)
             self._store_solution_rows(progress_callback=self._update_busy)
             self._update_busy(100, "求解完成", "solve_done")
-            gravity_suffix = " | self_weight" if self.gravityEnabled else ""
-            self._set_status_text(
-                f"求解完成，云图数据已缓存{gravity_suffix}：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
-            )
+            if self.contour_image_cache_valid:
+                self._set_status_text(
+                    f"求解完成，云图数据和图片缓存已生成：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                )
+            else:
+                self._set_status_text(
+                    f"求解成功，但云图图片缓存生成失败：当前模型节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                )
             self.resultChanged.emit()
             return True
         except Exception as exc:
@@ -1965,6 +2043,18 @@ class WorkbenchBridge(QObject):
             return False
         finally:
             self._finish_busy()
+
+    @Slot(result=bool)
+    def solveCurrentModelAsync(self) -> bool:
+        if self.is_busy:
+            self._set_status_text("当前任务正在进行，请稍候。")
+            return False
+        if self.current_project is None:
+            self._set_status_text("请先新建或打开工程")
+            return False
+        self._begin_busy("正在求解", "准备求解...", "solve", 0, indeterminate=True)
+        QTimer.singleShot(0, self._prepare_and_start_solve_worker)
+        return True
 
     @Slot(result=bool)
     def clearResults(self) -> bool:
@@ -2422,10 +2512,16 @@ class WorkbenchBridge(QObject):
             self.summary = build_result_summary(solution)
             self._store_solution_rows(progress_callback=self._update_busy)
             self._update_busy(100, "求解完成", "solve_done")
-            self._set_status_text(
-                f"草图求解完成，云图数据已缓存：固定边 {fixed_edge_id}，载荷边 {load_edge_id}，"
-                f"节点 {self.summary.node_count}，单元 {self.summary.element_count}"
-            )
+            if self.contour_image_cache_valid:
+                self._set_status_text(
+                    f"草图求解完成，云图数据和图片缓存已生成：固定边 {fixed_edge_id}，载荷边 {load_edge_id}，"
+                    f"节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                )
+            else:
+                self._set_status_text(
+                    f"草图求解成功，但云图图片缓存生成失败：固定边 {fixed_edge_id}，载荷边 {load_edge_id}，"
+                    f"节点 {self.summary.node_count}，单元 {self.summary.element_count}"
+                )
             self.sketchChanged.emit()
             self.resultChanged.emit()
             return True
@@ -2579,6 +2675,375 @@ class WorkbenchBridge(QObject):
         except Exception:
             return None
 
+    def _run_generate_mesh_sync_after_overlay(self, target_size: float, min_angle: float) -> None:
+        print("[MESH] start", flush=True)
+        if self.current_project is None:
+            self._finish_busy()
+            self._set_status_text("请先新建或打开工程")
+            return
+        try:
+            ok = self._generate_quality_mesh_for_active_part(
+                target_size,
+                0.0,
+                min_angle,
+                manage_busy=False,
+            )
+            if ok:
+                self._set_status_text(
+                    f"网格生成完成：{self.sketch_mesh_node_count} 节点 / {self.sketch_mesh_element_count} 单元"
+                )
+        finally:
+            print("[MESH] finished", flush=True)
+            self._finish_busy()
+
+    def _prepare_and_start_solve_worker(self) -> None:
+        print("[SOLVE] start", flush=True)
+        if self.current_project is None:
+            self._finish_busy()
+            self._set_status_text("请先新建或打开工程")
+            return
+        try:
+            part = self._require_active_part()
+            edge_ids = {edge.id for edge in part.geometry.edges}
+            requires_gmsh_mesh = not {"bottom", "right", "top", "left"}.issubset(edge_ids)
+            if requires_gmsh_mesh and (self.current_sketch_mesh is None or self.current_mesh_type != "sketch_quality"):
+                self._update_busy(10, "生成求解所需网格", "solve_mesh", indeterminate=True)
+                mesh_ok = self._generate_quality_mesh_for_active_part(
+                    self.mesh_target_size,
+                    self.mesh_max_area,
+                    self.mesh_min_angle,
+                    manage_busy=False,
+                )
+                if not mesh_ok:
+                    self._finish_busy()
+                    return
+        except Exception as exc:
+            self._finish_busy()
+            self._set_status_text(f"求解失败: {exc}")
+            return
+        self._start_solve_worker()
+
+    def _start_solve_worker(self) -> None:
+        if self.current_project is None:
+            self._finish_busy()
+            self._set_status_text("请先新建或打开工程")
+            return
+        try:
+            project_snapshot = copy.deepcopy(self.current_project)
+            active_part_id = self.active_part_id or get_active_part_id(self.current_project)
+            session_cache_dir = create_contour_cache_dir(self._session_cache_id)
+            mesh_snapshot = copy.deepcopy(self.current_sketch_mesh)
+        except Exception as exc:
+            self._finish_busy()
+            self._set_status_text(f"求解失败: {exc}")
+            return
+
+        def task(progress_callback):
+            return self._build_solve_payload(
+                project_snapshot=project_snapshot,
+                active_part_id=active_part_id,
+                mesh_snapshot=mesh_snapshot,
+                session_cache_dir=session_cache_dir,
+                progress_callback=progress_callback,
+            )
+
+        self._launch_worker(
+            task,
+            success_handler=self._apply_solve_payload,
+            failure_prefix="求解失败",
+        )
+
+    def _launch_worker(self, task, *, success_handler, failure_prefix: str) -> None:
+        if _USE_FALLBACK:
+            try:
+                payload = task(self._handle_worker_progress)
+            except Exception as exc:
+                self._handle_worker_failed(f"{failure_prefix}: {exc}")
+                return
+            success_handler(payload)
+            return
+
+        self._cleanup_worker()
+        thread = QThread()
+        worker = FunctionWorker(task)
+        worker.moveToThread(thread)
+        worker.progressChanged.connect(self._handle_worker_progress)
+        worker.finished.connect(success_handler)
+        worker.failed.connect(lambda message: self._handle_worker_failed(f"{failure_prefix}: {message}"))
+        worker.finished.connect(self._on_worker_finished_cleanup)
+        worker.failed.connect(self._on_worker_failed_cleanup)
+        thread.started.connect(worker.run)
+        self._active_thread = thread
+        self._active_worker = worker
+        thread.start()
+
+    def _cleanup_worker(self) -> None:
+        worker = self._active_worker
+        thread = self._active_thread
+        self._active_worker = None
+        self._active_thread = None
+        if worker is not None and hasattr(worker, "deleteLater"):
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+        if thread is None:
+            return
+        try:
+            thread.quit()
+            thread.wait(2000)
+            thread.deleteLater()
+        except Exception:
+            return
+
+    def _on_worker_finished_cleanup(self, _payload=None) -> None:
+        worker = self._active_worker
+        thread = self._active_thread
+        if worker is not None and hasattr(worker, "deleteLater"):
+            worker.deleteLater()
+        if thread is not None:
+            thread.quit()
+            thread.wait(2000)
+            thread.deleteLater()
+        self._active_worker = None
+        self._active_thread = None
+
+    def _on_worker_failed_cleanup(self, _message=None) -> None:
+        self._on_worker_finished_cleanup()
+
+    def _handle_worker_progress(self, progress: int, message: str, stage: str) -> None:
+        self._update_busy(progress, message, stage, indeterminate=False)
+
+    def _handle_worker_failed(self, message: str) -> None:
+        self._cleanup_worker()
+        self._clear_solution()
+        self.resultChanged.emit()
+        self._finish_busy()
+        self._set_status_text(message)
+
+    def _apply_solve_payload(self, payload: dict[str, object]) -> None:
+        self._cleanup_worker()
+        self.current_solution = payload["solution"]  # type: ignore[assignment]
+        self.current_sketch_mesh = payload["mesh"]  # type: ignore[assignment]
+        self.node_rows = list(payload["node_rows"])  # type: ignore[arg-type]
+        self.element_rows = list(payload["element_rows"])  # type: ignore[arg-type]
+        self.summary = payload["summary"]  # type: ignore[assignment]
+        self.node_rows_json = str(payload["node_rows_json"])
+        self.element_rows_json = str(payload["element_rows_json"])
+        self.deformation_preview_json = str(payload["deformation_preview_json"])
+        self.deformation_plot_json = self.deformation_preview_json
+        self.displacement_contour_json = str(payload["displacement_contour_json"])
+        self.stress_contour_json = str(payload["stress_contour_json"])
+        self.stress_contour_exact_json = str(payload["stress_contour_exact_json"])
+        self.stress_contour_smooth_json = str(payload["stress_contour_smooth_json"])
+        self.contour_cache_valid = True
+        self.contour_cache_summary_text = "云图数据缓存有效"
+        self.contour_image_cache_dir = str(payload["contour_image_cache_dir"])
+        self.contour_image_cache_json = str(payload["contour_image_cache_json"])
+        self.contour_image_cache_valid = bool(payload["contour_image_cache_valid"])
+        self._sync_sketch_mesh_from_current_mesh()
+        self._finish_busy()
+        if self.contour_image_cache_valid:
+            self._set_status_text("求解完成，云图数据和图片缓存已生成。")
+        else:
+            self._set_status_text("求解成功，但云图图片缓存生成失败，可尝试重新生成。")
+        self.resultChanged.emit()
+
+    def _build_solve_payload(
+        self,
+        *,
+        project_snapshot: EngineeringProject,
+        active_part_id: str,
+        mesh_snapshot: MeshModel | None,
+        session_cache_dir: Path,
+        progress_callback,
+    ) -> dict[str, object]:
+        part = project_snapshot.get_part_by_id(active_part_id)
+        if part is None:
+            raise ValueError(f"活动零件不存在：{active_part_id}")
+        print("[SOLVE] worker start", flush=True)
+        progress_callback(5, "检查几何、材料、网格、约束和载荷", "solve_validate")
+        edge_ids = {edge.id for edge in part.geometry.edges}
+        if {"bottom", "right", "top", "left"}.issubset(edge_ids):
+            progress_callback(15, "编译工程模型", "solve_compile")
+            progress_callback(30, "组装有限元方程", "solve_assemble")
+            progress_callback(50, "求解线性方程组", "solve_linear")
+            solution = solve_workbench_project(
+                project=project_snapshot,
+                part_id=active_part_id,
+                step_id="step_static",
+                nx=self.project_mesh_nx,
+                ny=self.project_mesh_ny,
+            )
+            mesh = solution.mesh
+        else:
+            if not part.geometry.faces:
+                raise ValueError("当前草图尚未生成闭合面")
+            if not project_snapshot.boundary_conditions:
+                raise ValueError("当前模型缺少约束")
+            if not project_snapshot.loads and not bool(project_snapshot.metadata.get("gravity_enabled", False)):
+                raise ValueError("当前模型缺少载荷")
+            if mesh_snapshot is None:
+                raise ValueError("求解失败: 缺少预生成网格")
+            progress_callback(15, "编译工程模型", "solve_compile")
+            mesh = mesh_snapshot
+            step_id = self._default_step_id_for_project(project_snapshot)
+            temp_project = EngineeringProject(
+                name=f"{project_snapshot.name}_active_model",
+                materials=list(project_snapshot.materials),
+                sections=list(project_snapshot.sections),
+                parts=[part],
+                assembly=project_snapshot.assembly,
+                analysis_steps=list(project_snapshot.analysis_steps),
+                loads=list(project_snapshot.loads),
+                boundary_conditions=list(project_snapshot.boundary_conditions),
+                metadata=dict(project_snapshot.metadata),
+            )
+            compiled_bundle = compile_workbench_project(project=temp_project, mesh=mesh, step_id=step_id)
+            progress_callback(30, "组装有限元方程", "solve_assemble")
+            progress_callback(50, "求解线性方程组", "solve_linear")
+            solver_result = solve_static_linear(compiled_bundle.fem_model)
+            solution = WorkbenchSolveResult(
+                project=temp_project,
+                mesh=mesh,
+                compiled_bundle=compiled_bundle,
+                solver_result=solver_result,
+                warnings=list(compiled_bundle.warnings),
+            )
+
+        progress_callback(65, "计算节点位移和单元应力", "solve_post")
+        node_rows = build_node_displacement_rows(solution)
+        element_rows = build_element_result_rows(solution)
+        summary = build_result_summary(solution)
+        cache_payload = self._build_solution_cache_payload(solution, node_rows, element_rows, progress_callback)
+        print("[CONTOUR] start image cache", flush=True)
+        progress_callback(92, "预渲染变形示意图图片", "contour_image_deformation")
+        image_warning = ""
+        image_map: dict[str, dict[str, str]] = {}
+        image_cache_valid = False
+        clear_contour_cache_dir(session_cache_dir)
+        session_cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            progress_callback(95, "预渲染位移云图图片组合", "contour_image_displacement")
+            progress_callback(98, "预渲染应力云图图片组合", "contour_image_stress")
+            image_map = generate_contour_images(
+                output_dir=session_cache_dir,
+                deformation_data=cache_payload["deformation_data"],
+                displacement_data=cache_payload["displacement_data"],
+                stress_exact_data=cache_payload["stress_exact_data"],
+                stress_smooth_data=cache_payload["stress_smooth_data"],
+            )
+            image_cache_valid = True
+        except Exception as exc:
+            image_warning = str(exc)
+            image_map = {}
+            image_cache_valid = False
+        print("[CONTOUR] finish image cache", flush=True)
+        progress_callback(100, "求解完成", "solve_done")
+        print("[SOLVE] worker finished", flush=True)
+        return {
+            "solution": solution,
+            "mesh": mesh,
+            "node_rows": node_rows,
+            "element_rows": element_rows,
+            "summary": summary,
+            "node_rows_json": cache_payload["node_rows_json"],
+            "element_rows_json": cache_payload["element_rows_json"],
+            "deformation_preview_json": cache_payload["deformation_preview_json"],
+            "displacement_contour_json": cache_payload["displacement_contour_json"],
+            "stress_contour_json": cache_payload["stress_contour_json"],
+            "stress_contour_exact_json": cache_payload["stress_contour_exact_json"],
+            "stress_contour_smooth_json": cache_payload["stress_contour_smooth_json"],
+            "contour_image_cache_dir": str(session_cache_dir),
+            "contour_image_cache_json": build_contour_image_cache_json(image_map),
+            "contour_image_cache_valid": image_cache_valid,
+            "contour_image_warning": image_warning,
+        }
+
+    def _build_solution_cache_payload(self, solution, node_rows, element_rows, progress_callback=None) -> dict[str, object]:
+        node_rows_json = json.dumps([row.to_dict() for row in node_rows], ensure_ascii=False)
+        element_rows_json = json.dumps([row.to_dict() for row in element_rows], ensure_ascii=False)
+        if progress_callback is not None:
+            progress_callback(72, "生成变形示意图数据", "contour_deformation")
+        deformation_data = build_deformation_plot_data(solution)
+        if progress_callback is not None:
+            progress_callback(78, "生成位移云图数据", "contour_displacement")
+        displacement_data = build_displacement_contour_data(solution)
+        if progress_callback is not None:
+            progress_callback(84, "生成应力云图精确模式数据", "contour_stress_exact")
+        stress_data = build_stress_contour_data(solution)
+        stress_exact_data = {
+            "plot_type": "stress_contour_exact",
+            "title": "Von Mises 应力云图",
+            "mode_label": "精确模式（单元常值）",
+            "scalar_label": str(stress_data.get("scalar_label", "Von Mises")),
+            "unit_label": str(stress_data.get("unit_label", "Pa")),
+            "elements": [
+                {
+                    "id": row["id"],
+                    "node_ids": list(row["node_ids"]),
+                    "source_face_id": row.get("source_face_id"),
+                    "von_mises": row["element_von_mises"],
+                }
+                for row in stress_data.get("elements", [])
+            ],
+            "nodes": list(displacement_data.get("nodes", [])),
+            "min_von_mises": float(stress_data.get("min_von_mises", 0.0) or 0.0),
+            "max_von_mises": float(stress_data.get("max_von_mises", 0.0) or 0.0),
+            "default_scale_factor": float(displacement_data.get("default_scale_factor", 1.0) or 1.0),
+        }
+        if progress_callback is not None:
+            progress_callback(88, "生成应力云图平滑模式数据", "contour_stress_smooth")
+        stress_smooth_data = {
+            "plot_type": "stress_contour_smooth",
+            "title": "Von Mises 应力云图",
+            "mode_label": "平滑模式（节点平均）",
+            "scalar_label": str(stress_data.get("scalar_label", "Von Mises")),
+            "unit_label": str(stress_data.get("unit_label", "Pa")),
+            "nodes": [
+                {
+                    **node,
+                    "ux": next((row.ux for row in node_rows if row.node_id == int(node["id"])), 0.0),
+                    "uy": next((row.uy for row in node_rows if row.node_id == int(node["id"])), 0.0),
+                }
+                for node in stress_data.get("nodes", [])
+            ],
+            "elements": [
+                {
+                    "id": row["id"],
+                    "node_ids": list(row["node_ids"]),
+                    "source_face_id": row.get("source_face_id"),
+                    "nodal_smoothed_von_mises": list(row["nodal_smoothed_von_mises"]),
+                }
+                for row in stress_data.get("elements", [])
+            ],
+            "min_von_mises": float(stress_data.get("min_smoothed_von_mises", 0.0) or 0.0),
+            "max_von_mises": float(stress_data.get("max_smoothed_von_mises", 0.0) or 0.0),
+            "default_scale_factor": float(displacement_data.get("default_scale_factor", 1.0) or 1.0),
+        }
+        return {
+            "node_rows_json": node_rows_json,
+            "element_rows_json": element_rows_json,
+            "deformation_data": deformation_data,
+            "displacement_data": displacement_data,
+            "stress_data": stress_data,
+            "stress_exact_data": stress_exact_data,
+            "stress_smooth_data": stress_smooth_data,
+            "deformation_preview_json": json.dumps(deformation_data, ensure_ascii=False),
+            "displacement_contour_json": json.dumps(displacement_data, ensure_ascii=False),
+            "stress_contour_json": json.dumps(stress_data, ensure_ascii=False),
+            "stress_contour_exact_json": json.dumps(stress_exact_data, ensure_ascii=False),
+            "stress_contour_smooth_json": json.dumps(stress_smooth_data, ensure_ascii=False),
+        }
+
+    def _default_step_id_for_project(self, project: EngineeringProject) -> str:
+        step_id = "step_static"
+        if project.get_analysis_step_by_id(step_id) is not None:
+            return step_id
+        if not project.analysis_steps:
+            raise ValueError("当前工程没有可用分析步")
+        return project.analysis_steps[0].id
+
     def _set_busy_state(
         self,
         active: bool,
@@ -2586,23 +3051,57 @@ class WorkbenchBridge(QObject):
         message: str,
         progress: int,
         stage: str,
+        indeterminate: bool | None = None,
     ) -> None:
         self.is_busy = bool(active)
         self.busy_title = str(title)
         self.busy_message = str(message)
         self.busy_progress = max(0, min(100, int(progress)))
         self.busy_stage = str(stage)
+        if indeterminate is None:
+            self.busy_indeterminate = bool(active) and self.busy_progress <= 0
+        else:
+            self.busy_indeterminate = bool(indeterminate)
         self.busyStateChanged.emit()
         self._process_ui_events()
 
-    def _begin_busy(self, title: str, message: str, stage: str, progress: int = 0) -> None:
-        self._set_busy_state(True, title, message, progress, stage)
+    def _invoke_set_busy_state(
+        self,
+        active: bool,
+        title: str,
+        message: str,
+        progress: int,
+        stage: str,
+        indeterminate: bool | None = None,
+    ) -> None:
+        try:
+            self._set_busy_state(active, title, message, progress, stage, indeterminate)
+        except TypeError:
+            self._set_busy_state(active, title, message, progress, stage)
 
-    def _update_busy(self, progress: int, message: str, stage: str) -> None:
-        self._set_busy_state(True, self.busy_title, message, progress, stage)
+    def _begin_busy(
+        self,
+        title: str,
+        message: str,
+        stage: str,
+        progress: int = 0,
+        *,
+        indeterminate: bool = False,
+    ) -> None:
+        self._invoke_set_busy_state(True, title, message, progress, stage, indeterminate)
+
+    def _update_busy(
+        self,
+        progress: int,
+        message: str,
+        stage: str,
+        *,
+        indeterminate: bool | None = None,
+    ) -> None:
+        self._invoke_set_busy_state(True, self.busy_title, message, progress, stage, indeterminate)
 
     def _finish_busy(self) -> None:
-        self._set_busy_state(False, "", "", 0, "")
+        self._invoke_set_busy_state(False, "", "", 0, "idle", False)
 
     def _clear_solution(self) -> None:
         self.current_solution = None
@@ -2622,16 +3121,9 @@ class WorkbenchBridge(QObject):
         self.stress_contour_smooth_json = "{}"
         self.contour_cache_valid = False
         self.contour_cache_summary_text = ""
+        self.clear_contour_image_cache()
 
     def _store_solution_rows(self, progress_callback=None) -> None:
-        self.node_rows_json = json.dumps(
-            [row.to_dict() for row in self.node_rows],
-            ensure_ascii=False,
-        )
-        self.element_rows_json = json.dumps(
-            [row.to_dict() for row in self.element_rows],
-            ensure_ascii=False,
-        )
         if self.current_solution is None:
             self.deformation_preview_json = "{}"
             self.deformation_plot_json = "{}"
@@ -2642,62 +3134,75 @@ class WorkbenchBridge(QObject):
             self.contour_cache_valid = False
             self.contour_cache_summary_text = ""
             return
-        if progress_callback is not None:
-            progress_callback(82, "生成变形示意图数据", "contour_deformation")
-        deformation_data = build_deformation_plot_data(self.current_solution)
-        self.deformation_preview_json = json.dumps(deformation_data, ensure_ascii=False)
+        cache_payload = self._build_solution_cache_payload(
+            self.current_solution,
+            self.node_rows,
+            self.element_rows,
+            progress_callback,
+        )
+        self.node_rows_json = str(cache_payload["node_rows_json"])
+        self.element_rows_json = str(cache_payload["element_rows_json"])
+        self.deformation_preview_json = str(cache_payload["deformation_preview_json"])
         self.deformation_plot_json = self.deformation_preview_json
-        if progress_callback is not None:
-            progress_callback(88, "生成位移云图数据", "contour_displacement")
-        displacement_data = build_displacement_contour_data(self.current_solution)
-        self.displacement_contour_json = json.dumps(displacement_data, ensure_ascii=False)
-        if progress_callback is not None:
-            progress_callback(94, "生成应力云图数据", "contour_stress")
-        stress_data = build_stress_contour_data(self.current_solution)
-        self.stress_contour_json = json.dumps(stress_data, ensure_ascii=False)
-        stress_exact = {
-            "plot_type": "stress_contour_exact",
-            "title": "Von Mises 应力云图",
-            "mode_label": "精确模式（单元常值）",
-            "scalar_label": str(stress_data.get("scalar_label", "Von Mises")),
-            "unit_label": str(stress_data.get("unit_label", "Pa")),
-            "elements": [
-                {
-                    "id": row["id"],
-                    "node_ids": list(row["node_ids"]),
-                    "source_face_id": row.get("source_face_id"),
-                    "von_mises": row["element_von_mises"],
-                }
-                for row in stress_data.get("elements", [])
-            ],
-            "min_von_mises": float(stress_data.get("min_von_mises", 0.0) or 0.0),
-            "max_von_mises": float(stress_data.get("max_von_mises", 0.0) or 0.0),
-        }
-        stress_smooth = {
-            "plot_type": "stress_contour_smooth",
-            "title": "Von Mises 应力云图",
-            "mode_label": "平滑模式（节点平均）",
-            "scalar_label": str(stress_data.get("scalar_label", "Von Mises")),
-            "unit_label": str(stress_data.get("unit_label", "Pa")),
-            "nodes": list(stress_data.get("nodes", [])),
-            "elements": [
-                {
-                    "id": row["id"],
-                    "node_ids": list(row["node_ids"]),
-                    "source_face_id": row.get("source_face_id"),
-                    "nodal_smoothed_von_mises": list(row["nodal_smoothed_von_mises"]),
-                }
-                for row in stress_data.get("elements", [])
-            ],
-            "min_von_mises": float(stress_data.get("min_smoothed_von_mises", 0.0) or 0.0),
-            "max_von_mises": float(stress_data.get("max_smoothed_von_mises", 0.0) or 0.0),
-        }
-        if progress_callback is not None:
-            progress_callback(98, "写入后处理缓存", "contour_cache")
-        self.stress_contour_exact_json = json.dumps(stress_exact, ensure_ascii=False)
-        self.stress_contour_smooth_json = json.dumps(stress_smooth, ensure_ascii=False)
+        self.displacement_contour_json = str(cache_payload["displacement_contour_json"])
+        self.stress_contour_json = str(cache_payload["stress_contour_json"])
+        self.stress_contour_exact_json = str(cache_payload["stress_contour_exact_json"])
+        self.stress_contour_smooth_json = str(cache_payload["stress_contour_smooth_json"])
         self.contour_cache_valid = True
-        self.contour_cache_summary_text = "云图缓存有效"
+        self.contour_cache_summary_text = "云图数据缓存有效"
+        self._generate_contour_image_cache(progress_callback=progress_callback)
+
+    def _generate_contour_image_cache(self, progress_callback=None) -> None:
+        if self.current_solution is None or not self.contour_cache_valid:
+            self.clear_contour_image_cache()
+            return
+        cache_payload = self._build_solution_cache_payload(
+            self.current_solution,
+            self.node_rows,
+            self.element_rows,
+            None,
+        )
+        cache_dir = create_contour_cache_dir(self._session_cache_id)
+        clear_contour_cache_dir(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        if progress_callback is not None:
+            progress_callback(92, "预渲染变形示意图图片", "contour_image_deformation")
+        try:
+            if progress_callback is not None:
+                progress_callback(95, "预渲染位移云图图片组合", "contour_image_displacement")
+            if progress_callback is not None:
+                progress_callback(98, "预渲染应力云图图片组合", "contour_image_stress")
+            image_map = generate_contour_images(
+                output_dir=cache_dir,
+                deformation_data=cache_payload["deformation_data"],  # type: ignore[arg-type]
+                displacement_data=cache_payload["displacement_data"],  # type: ignore[arg-type]
+                stress_exact_data=cache_payload["stress_exact_data"],  # type: ignore[arg-type]
+                stress_smooth_data=cache_payload["stress_smooth_data"],  # type: ignore[arg-type]
+            )
+        except Exception:
+            self.clear_contour_image_cache()
+            return
+        self.contour_image_cache_dir = str(cache_dir)
+        self.contour_image_cache_json = build_contour_image_cache_json(image_map)
+        self.contour_image_cache_valid = True
+
+    def clear_contour_image_cache(self) -> None:
+        clear_contour_cache_dir(self.contour_image_cache_dir)
+        self.contour_image_cache_valid = False
+        self.contour_image_cache_dir = ""
+        self.contour_image_cache_json = "{}"
+
+    @Slot(str)
+    def invalidate_solution_and_contour_cache(self, reason: str = "模型已修改，请重新求解", clear_status: bool = True) -> None:
+        self._clear_solution()
+        if clear_status and reason:
+            self._set_status_text(reason)
+        self.resultChanged.emit()
+
+    @Slot()
+    def shutdown(self) -> None:
+        self._cleanup_worker()
+        self.clear_contour_image_cache()
 
     def _reset_sketch_boundary_load_state(self, reset_load_values: bool = False) -> None:
         self.selected_sketch_point_id = ""

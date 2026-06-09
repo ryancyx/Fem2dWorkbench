@@ -14,6 +14,7 @@ def main() -> int:
     engine = QQmlApplicationEngine()
 
     bridge = WorkbenchBridge()
+    app.aboutToQuit.connect(bridge.shutdown)
     engine.rootContext().setContextProperty("bridge", bridge)
 
     qml_path = Path(__file__).resolve().parent / "ui" / "qml" / "MainWorkbench.qml"
