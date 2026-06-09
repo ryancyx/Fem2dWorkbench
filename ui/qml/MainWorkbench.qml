@@ -17,13 +17,14 @@ ApplicationWindow {
 
     property string currentMode: "建模与材料"
     // 视图缩放说明：viewportScaleDisplayBase 对应界面显示的 100%。
-    // 这里把上一版“1%”的实际大小重新标定为 100%，
-    // 默认视图再缩小 10 倍，因此默认显示为 10%。
-    property real viewportScaleDisplayBase: 0.01
-    property real defaultViewportScale: 0.001
+    // 需求：把旧缩放体系中的 35% 重新标记为界面上的 100%。
+    // 注意：显示标定基准与绘制最小尺度基准分开，避免 100% 被强行撑回旧 100% 的大小。
+    property real viewportLegacyScaleBase: 0.01
+    property real viewportScaleDisplayBase: viewportLegacyScaleBase * 0.35
+    property real defaultViewportScale: viewportScaleDisplayBase
     property real viewportScale: defaultViewportScale
-    property real minViewportScale: 0.000001
-    property real maxViewportScale: 10.0
+    property real minViewportScale: viewportScaleDisplayBase * 0.01
+    property real maxViewportScale: viewportScaleDisplayBase * 20.0
     property real viewportOffsetX: 0.0
     property real viewportOffsetY: 0.0
     property real lastMouseX: 0.0
@@ -326,6 +327,31 @@ ApplicationWindow {
 
     function bottomStatusSecondaryText() {
         return "选择：" + root.shortSelectionTypeText() + " / " + root.shortSelectionNameText()
+    }
+
+    function fakeProgressAt(elapsedMs, estimatedMs, holdProgress) {
+        if (estimatedMs <= 0) {
+            return holdProgress
+        }
+
+        var r = Math.min(elapsedMs / estimatedMs, 1.0)
+
+        if (r < 0.2) {
+            return 30.0 * (r / 0.2)
+        } else if (r < 0.7) {
+            return 30.0 + 40.0 * ((r - 0.2) / 0.5)
+        } else {
+            return 70.0 + (holdProgress - 70.0) * ((r - 0.7) / 0.3)
+        }
+    }
+
+    function busyOverlayMessage() {
+        if (bridge.isBusy
+                && bridge.busyProgressMode === "fake_determinate"
+                && (Date.now() - busyOverlay.busyStartMs) > bridge.busyEstimatedMs) {
+            return bridge.busyMessage + " 仍在处理，请稍候..."
+        }
+        return bridge.busyMessage
     }
 
     function ensureContourCacheAvailable() {
@@ -763,9 +789,10 @@ ApplicationWindow {
         var maxDrawW = viewport.width * 0.68
         var maxDrawH = viewport.height * 0.62
         var drawScale = Math.min(maxDrawW / modelW, maxDrawH / modelH) * root.viewportScale
-        // 上一版 1% 视图对应的最小绘制尺度是 48。
-        // 现在将该大小标定为 100%，并让绘制尺度随 viewportScale 线性缩放。
-        drawScale = Math.max(48.0 * (root.viewportScale / root.viewportScaleDisplayBase), drawScale)
+        // 旧缩放体系中 viewportLegacyScaleBase 对应的最小绘制尺度是 48。
+        // 当前 UI 把旧 35% 显示为 100%，但绘制尺寸仍按旧物理基准缩放，
+        // 因此新 100% 的最小绘制尺度为 48 * 0.35 = 16.8。
+        drawScale = Math.max(48.0 * (root.viewportScale / root.viewportLegacyScaleBase), drawScale)
         root.sketchDrawScale = drawScale
         root.lastModelBoundsW = modelW * drawScale
         root.lastModelBoundsH = modelH * drawScale
@@ -2764,13 +2791,51 @@ ApplicationWindow {
         color: "#66000000"
         z: 9999
         property real flowOffset: -0.4
+        property real busyVisualProgress: 0
+        property double busyStartMs: 0
+        property bool busyWasActive: false
 
         NumberAnimation on flowOffset {
-            running: busyOverlay.visible && bridge.busyIndeterminate
+            running: busyOverlay.visible && bridge.busyProgressMode === "indeterminate"
             loops: Animation.Infinite
             from: -0.4
             to: 1.2
             duration: 1300
+        }
+
+        Timer {
+            id: fakeProgressTimer
+            interval: 16
+            repeat: true
+            running: bridge.isBusy && bridge.busyProgressMode === "fake_determinate"
+            onTriggered: {
+                var now = Date.now()
+                var elapsed = now - busyOverlay.busyStartMs
+                busyOverlay.busyVisualProgress = root.fakeProgressAt(
+                    elapsed,
+                    bridge.busyEstimatedMs,
+                    bridge.busyHoldProgress
+                )
+            }
+        }
+
+        Connections {
+            target: bridge
+
+            function onBusyStateChanged() {
+                if (bridge.isBusy) {
+                    if (!busyOverlay.busyWasActive && bridge.busyProgressMode === "fake_determinate") {
+                        busyOverlay.busyStartMs = Date.now()
+                        busyOverlay.busyVisualProgress = 0
+                    } else if (bridge.busyProgressMode === "determinate") {
+                        busyOverlay.busyVisualProgress = bridge.busyProgress
+                    }
+                    busyOverlay.busyWasActive = true
+                } else {
+                    busyOverlay.busyVisualProgress = 0
+                    busyOverlay.busyWasActive = false
+                }
+            }
         }
 
         MouseArea {
@@ -2800,7 +2865,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.fillWidth: true
-                    text: bridge.busyMessage
+                    text: root.busyOverlayMessage()
                     wrapMode: Text.WordWrap
                     color: "#475569"
                 }
@@ -2810,14 +2875,21 @@ ApplicationWindow {
                     from: 0
                     to: 100
                     value: bridge.busyProgress
-                    indeterminate: bridge.busyIndeterminate
-                    visible: !bridge.busyIndeterminate
+                    visible: bridge.busyProgressMode === "determinate"
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 100
+                    value: busyOverlay.busyVisualProgress
+                    visible: bridge.busyProgressMode === "fake_determinate"
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 12
-                    visible: bridge.busyIndeterminate
+                    visible: bridge.busyProgressMode === "indeterminate"
                     radius: 6
                     color: "#E2E8F0"
                     clip: true
@@ -2844,7 +2916,11 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: bridge.busyIndeterminate ? "处理中..." : bridge.busyProgress + "%"
+                        text: bridge.busyProgressMode === "indeterminate"
+                              ? "处理中..."
+                              : ((bridge.busyProgressMode === "fake_determinate"
+                                  ? Math.round(busyOverlay.busyVisualProgress)
+                                  : bridge.busyProgress) + "%")
                         color: "#0F172A"
                         font.pixelSize: 12
                     }

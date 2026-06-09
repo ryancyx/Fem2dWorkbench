@@ -9,9 +9,11 @@ def test_stage18_qml_busy_overlay_regression() -> None:
     assert "id: busyOverlay" in qml_text
     assert "ProgressBar" in qml_text
     assert "value: bridge.busyProgress" in qml_text
+    assert "bridge.busyProgressMode" in qml_text
+    assert "bridge.busyEstimatedMs" in qml_text
+    assert "bridge.busyHoldProgress" in qml_text
     assert "visible: bridge.isBusy" in qml_text
     assert "text: bridge.busyTitle" in qml_text
-    assert "text: bridge.busyMessage" in qml_text
-    assert "indeterminate: bridge.busyIndeterminate" in qml_text
+    assert "root.busyOverlayMessage()" in qml_text
     assert "bridge.generateMeshAsync" in qml_text
     assert "bridge.solveCurrentModelAsync" in qml_text

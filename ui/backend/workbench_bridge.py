@@ -288,6 +288,9 @@ class WorkbenchBridge(QObject):
         self.busy_title = ""
         self.busy_message = ""
         self.busy_progress = 0
+        self.busy_progress_mode = "determinate"
+        self.busy_estimated_ms = 0
+        self.busy_hold_progress = 95
         self.busy_indeterminate = False
         self.busy_stage = ""
         self.selected_geometry_type = ""
@@ -615,6 +618,18 @@ class WorkbenchBridge(QObject):
     @Property(int, notify=busyStateChanged)
     def busyProgress(self) -> int:
         return self.busy_progress
+
+    @Property(str, notify=busyStateChanged)
+    def busyProgressMode(self) -> str:
+        return self.busy_progress_mode
+
+    @Property(int, notify=busyStateChanged)
+    def busyEstimatedMs(self) -> int:
+        return self.busy_estimated_ms
+
+    @Property(int, notify=busyStateChanged)
+    def busyHoldProgress(self) -> int:
+        return self.busy_hold_progress
 
     @Property(bool, notify=busyStateChanged)
     def busyIndeterminate(self) -> bool:
@@ -1672,8 +1687,16 @@ class WorkbenchBridge(QObject):
         if self.is_busy:
             self._set_status_text("当前任务正在进行，请稍候。")
             return False
-        self._begin_busy("正在生成网格", "准备生成网格...", "mesh", 0, indeterminate=True)
-        QTimer.singleShot(0, lambda: self._run_generate_mesh_sync_after_overlay(float(target_size), float(min_angle)))
+        self._begin_busy(
+            "正在生成网格",
+            "正在准备网格生成...",
+            "mesh",
+            0,
+            progress_mode="fake_determinate",
+            estimated_ms=1800,
+            hold_progress=85,
+        )
+        QTimer.singleShot(350, lambda: self._run_generate_mesh_sync_after_overlay(float(target_size), float(min_angle)))
         return True
 
     @Slot(str, result=bool)
@@ -2049,11 +2072,16 @@ class WorkbenchBridge(QObject):
         if self.is_busy:
             self._set_status_text("当前任务正在进行，请稍候。")
             return False
-        if self.current_project is None:
-            self._set_status_text("请先新建或打开工程")
-            return False
-        self._begin_busy("正在求解", "准备求解...", "solve", 0, indeterminate=True)
-        QTimer.singleShot(0, self._prepare_and_start_solve_worker)
+        self._begin_busy(
+            "正在求解",
+            "正在准备求解...",
+            "solve",
+            0,
+            progress_mode="fake_determinate",
+            estimated_ms=7000,
+            hold_progress=97,
+        )
+        QTimer.singleShot(80, self._prepare_and_start_solve_worker)
         return True
 
     @Slot(result=bool)
@@ -2675,6 +2703,19 @@ class WorkbenchBridge(QObject):
         except Exception:
             return None
 
+    def _set_busy_progress_presentation(
+        self,
+        progress_mode: str,
+        estimated_ms: int,
+        hold_progress: int,
+    ) -> None:
+        self.busy_progress_mode = str(progress_mode)
+        self.busy_estimated_ms = max(0, int(estimated_ms))
+        self.busy_hold_progress = max(0, min(100, int(hold_progress)))
+        self.busy_indeterminate = self.busy_progress_mode == "indeterminate"
+        self.busyStateChanged.emit()
+        self._process_ui_events()
+
     def _run_generate_mesh_sync_after_overlay(self, target_size: float, min_angle: float) -> None:
         print("[MESH] start", flush=True)
         if self.current_project is None:
@@ -2689,12 +2730,12 @@ class WorkbenchBridge(QObject):
                 manage_busy=False,
             )
             if ok:
-                self._set_status_text(
-                    f"网格生成完成：{self.sketch_mesh_node_count} 节点 / {self.sketch_mesh_element_count} 单元"
-                )
+                self._set_status_text(f"网格生成完成：{self.sketch_mesh_node_count} 节点 / {self.sketch_mesh_element_count} 单元")
+                self._finish_busy_success("网格生成完成", "mesh_done")
+            else:
+                self._finish_busy()
         finally:
             print("[MESH] finished", flush=True)
-            self._finish_busy()
 
     def _prepare_and_start_solve_worker(self) -> None:
         print("[SOLVE] start", flush=True)
@@ -2842,11 +2883,12 @@ class WorkbenchBridge(QObject):
         self.contour_image_cache_json = str(payload["contour_image_cache_json"])
         self.contour_image_cache_valid = bool(payload["contour_image_cache_valid"])
         self._sync_sketch_mesh_from_current_mesh()
-        self._finish_busy()
         if self.contour_image_cache_valid:
             self._set_status_text("求解完成，云图数据和图片缓存已生成。")
+            self._finish_busy_success("完成", "solve_done")
         else:
             self._set_status_text("求解成功，但云图图片缓存生成失败，可尝试重新生成。")
+            self._finish_busy_success("完成", "solve_done")
         self.resultChanged.emit()
 
     def _build_solve_payload(
@@ -3059,7 +3101,7 @@ class WorkbenchBridge(QObject):
         self.busy_progress = max(0, min(100, int(progress)))
         self.busy_stage = str(stage)
         if indeterminate is None:
-            self.busy_indeterminate = bool(active) and self.busy_progress <= 0
+            self.busy_indeterminate = self.busy_progress_mode == "indeterminate" and bool(active)
         else:
             self.busy_indeterminate = bool(indeterminate)
         self.busyStateChanged.emit()
@@ -3079,6 +3121,15 @@ class WorkbenchBridge(QObject):
         except TypeError:
             self._set_busy_state(active, title, message, progress, stage)
 
+    def _clear_busy(self) -> None:
+        self._set_busy_progress_presentation("determinate", 0, 95)
+        self._invoke_set_busy_state(False, "", "", 0, "idle", False)
+
+    def _finish_busy_success(self, message: str, stage: str) -> None:
+        self._set_busy_progress_presentation("determinate", 0, 100)
+        self._invoke_set_busy_state(True, self.busy_title, message, 100, stage, False)
+        QTimer.singleShot(300, self._clear_busy)
+
     def _begin_busy(
         self,
         title: str,
@@ -3087,7 +3138,12 @@ class WorkbenchBridge(QObject):
         progress: int = 0,
         *,
         indeterminate: bool = False,
+        progress_mode: str | None = None,
+        estimated_ms: int = 0,
+        hold_progress: int = 95,
     ) -> None:
+        resolved_mode = progress_mode or ("indeterminate" if indeterminate else "determinate")
+        self._set_busy_progress_presentation(resolved_mode, estimated_ms, hold_progress)
         self._invoke_set_busy_state(True, title, message, progress, stage, indeterminate)
 
     def _update_busy(
@@ -3101,7 +3157,7 @@ class WorkbenchBridge(QObject):
         self._invoke_set_busy_state(True, self.busy_title, message, progress, stage, indeterminate)
 
     def _finish_busy(self) -> None:
-        self._invoke_set_busy_state(False, "", "", 0, "idle", False)
+        self._clear_busy()
 
     def _clear_solution(self) -> None:
         self.current_solution = None

@@ -16,7 +16,14 @@ ApplicationWindow {
     color: "#EEF3F8"
 
     property string currentMode: "建模与材料"
-    property real viewportScale: 1.0
+    // 视图缩放说明：viewportScaleDisplayBase 对应界面显示的 100%。
+    // 这里把上一版“1%”的实际大小重新标定为 100%，
+    // 默认视图再缩小 10 倍，因此默认显示为 10%。
+    property real viewportScaleDisplayBase: 0.01
+    property real defaultViewportScale: 0.001
+    property real viewportScale: defaultViewportScale
+    property real minViewportScale: 0.000001
+    property real maxViewportScale: 10.0
     property real viewportOffsetX: 0.0
     property real viewportOffsetY: 0.0
     property real lastMouseX: 0.0
@@ -50,8 +57,6 @@ ApplicationWindow {
     property string resultOverlayMode: "none"
     property real leftPanelWidth: 300
     property real rightPanelWidth: 380
-    property bool leftPanelVisible: true
-    property bool rightPanelVisible: true
     property real defaultLeftPanelWidth: 300
     property real defaultRightPanelWidth: 380
     property real minLeftPanelWidth: 240
@@ -60,9 +65,6 @@ ApplicationWindow {
     property real maxLeftPanelWidth: 420
     property real maxRightPanelWidth: 520
     property real splitterWidth: 8
-    property real resizeStartMouseX: 0.0
-    property real resizeStartLeftWidth: 300
-    property real resizeStartRightWidth: 380
 
     component PanelResizeHandle: Item {
         // Drag resizing is intentionally disabled.
@@ -160,6 +162,14 @@ ApplicationWindow {
         }
     }
 
+    function deformationPreviewData() {
+        try {
+            return JSON.parse(bridge.deformationPreviewJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
     function displacementContourData() {
         try {
             return JSON.parse(bridge.displacementContourJson)
@@ -176,6 +186,30 @@ ApplicationWindow {
         }
     }
 
+    function stressContourExactData() {
+        try {
+            return JSON.parse(bridge.stressContourExactJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
+    function stressContourSmoothData() {
+        try {
+            return JSON.parse(bridge.stressContourSmoothJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
+    function contourImageCacheMap() {
+        try {
+            return JSON.parse(bridge.contourImageCacheJson)
+        } catch (e) {
+            return {}
+        }
+    }
+
     function fileUrlToLocalPath(fileUrl) {
         var text = fileUrl.toString()
         if (text.indexOf("file:///") === 0) {
@@ -185,6 +219,18 @@ ApplicationWindow {
             return decodeURIComponent(text.substring(7))
         }
         return decodeURIComponent(text)
+    }
+
+    function localPathToFileUrl(path) {
+        var text = String(path || "")
+        if (text === "") {
+            return ""
+        }
+        var normalized = text.replace(/\\/g, "/")
+        if (normalized.indexOf("file:///") === 0) {
+            return normalized
+        }
+        return "file:///" + normalized
     }
 
     function ensureProjectFileSuffix(path) {
@@ -229,26 +275,8 @@ ApplicationWindow {
                 left = Math.max(root.minLeftPanelWidth, left - overflow)
             }
         }
-        root.leftPanelWidth = left
-        root.rightPanelWidth = right
-    }
-
-    function resizeLeftPanelBy(delta) {
-        var total = availableWorkspaceWidth()
-        var maxLeftByCenter = total - root.rightPanelWidth - root.minCenterPanelWidth - root.splitterWidth * 2
-        root.leftPanelWidth = Math.max(
-            root.minLeftPanelWidth,
-            Math.min(root.maxLeftPanelWidth, Math.min(maxLeftByCenter, root.resizeStartLeftWidth + delta))
-        )
-    }
-
-    function resizeRightPanelBy(delta) {
-        var total = availableWorkspaceWidth()
-        var maxRightByCenter = total - root.leftPanelWidth - root.minCenterPanelWidth - root.splitterWidth * 2
-        root.rightPanelWidth = Math.max(
-            root.minRightPanelWidth,
-            Math.min(root.maxRightPanelWidth, Math.min(maxRightByCenter, root.resizeStartRightWidth - delta))
-        )
+        root.leftPanelWidth= left
+        root.rightPanelWidth= right
     }
 
     function clearViewportSelection() {
@@ -265,6 +293,116 @@ ApplicationWindow {
         root.clearViewportSelection()
         root.clearBridgeSelectionIfNeeded()
         root.repaintViewport()
+    }
+
+    function shortSelectionTypeText() {
+        return bridge.selectedGeometryType === "" ? "无" : bridge.selectedGeometryType
+    }
+
+    function shortSelectionNameText() {
+        return bridge.selectedGeometryId === "" ? "未选择" : bridge.selectedGeometryId
+    }
+
+    function shortSelectionDetailText() {
+        if (bridge.selectedGeometryType === "") {
+            return "点击视口中的点、边或闭合面进行选择"
+        }
+        if (bridge.selectedGeometryType === "point") {
+            return "当前为几何点"
+        }
+        if (bridge.selectedGeometryType === "edge") {
+            return "当前为几何边"
+        }
+        return "当前为闭合面"
+    }
+
+    function leftPanelResultStatusText() {
+        return bridge.hasSolution ? "结果：已有" : "结果：暂无"
+    }
+
+    function bottomStatusPrimaryText() {
+        return root.viewportHint === "" ? bridge.statusText : root.viewportHint
+    }
+
+    function bottomStatusSecondaryText() {
+        return "选择：" + root.shortSelectionTypeText() + " / " + root.shortSelectionNameText()
+    }
+
+    function fakeProgressAt(elapsedMs, estimatedMs, holdProgress) {
+        if (estimatedMs <= 0) {
+            return holdProgress
+        }
+
+        var r = Math.min(elapsedMs / estimatedMs, 1.0)
+
+        if (r < 0.2) {
+            return 30.0 * (r / 0.2)
+        } else if (r < 0.7) {
+            return 30.0 + 40.0 * ((r - 0.2) / 0.5)
+        } else {
+            return 70.0 + (holdProgress - 70.0) * ((r - 0.7) / 0.3)
+        }
+    }
+
+    function busyOverlayMessage() {
+        if (bridge.isBusy
+                && bridge.busyProgressMode === "fake_determinate"
+                && (Date.now() - busyOverlay.busyStartMs) > bridge.busyEstimatedMs) {
+            return bridge.busyMessage + " 仍在处理，请稍候..."
+        }
+        return bridge.busyMessage
+    }
+
+    function ensureContourCacheAvailable() {
+        if (!bridge.hasSolution) {
+            root.viewportHint = "请先求解。"
+            return false
+        }
+        if (!bridge.contourCacheValid) {
+            root.viewportHint = "云图缓存已失效，请重新求解。"
+            return false
+        }
+        return true
+    }
+
+    function ensureContourImageCacheAvailable() {
+        if (!root.ensureContourCacheAvailable()) {
+            return false
+        }
+        if (!bridge.contourImageCacheValid) {
+            root.viewportHint = "云图图片缓存已失效，请重新求解。"
+            return false
+        }
+        return true
+    }
+
+    function contourVariantKey(showMesh, showDeformed) {
+        return "grid_" + (showMesh ? "on" : "off") + "_deformed_" + (showDeformed ? "on" : "off")
+    }
+
+    function contourImagePath(groupKey, variantKey) {
+        var imageMap = root.contourImageCacheMap()
+        var group = imageMap[groupKey] || {}
+        return group[variantKey] || ""
+    }
+
+    function deformationPreviewImageSource() {
+        return root.localPathToFileUrl(
+            root.contourImagePath("deformation_preview", root.contourVariantKey(deformationShowMeshBox.checked, deformationShowDeformedBox.checked))
+        )
+    }
+
+    function displacementContourImageSource() {
+        return root.localPathToFileUrl(
+            root.contourImagePath("displacement", root.contourVariantKey(displacementShowMeshBox.checked, displacementShowDeformedBox.checked))
+        )
+    }
+
+    function stressContourImageSource() {
+        var groupKey = stressContourModeCombo.currentIndex === 0 ? "stress_exact" : "stress_smooth"
+        return root.localPathToFileUrl(
+            root.contourImagePath(groupKey, root.contourVariantKey(stressShowMeshBox.checked, stressShowDeformedBox.checked))
+        )
     }
 
     function syncSelectionSummary() {
@@ -287,6 +425,36 @@ ApplicationWindow {
         if (viewport) {
             viewport.requestPaint()
         }
+    }
+
+    function clampViewportScale(value) {
+        return Math.max(root.minViewportScale, Math.min(root.maxViewportScale, value))
+    }
+
+    function resetViewportTransform() {
+        root.viewportScale = root.defaultViewportScale
+        root.viewportOffsetX = 0.0
+        root.viewportOffsetY = 0.0
+        root.repaintViewport()
+    }
+
+    function zoomViewportBy(factor) {
+        root.viewportScale = root.clampViewportScale(root.viewportScale * factor)
+        root.repaintViewport()
+    }
+
+    function viewportScaleText() {
+        var percent = root.viewportScale / root.viewportScaleDisplayBase * 100.0
+        if (percent < 0.1) {
+            return percent.toFixed(2) + "%"
+        }
+        if (percent < 10.0) {
+            return percent.toFixed(1) + "%"
+        }
+        if (percent < 1000.0) {
+            return percent.toFixed(0) + "%"
+        }
+        return percent.toFixed(0) + "%"
     }
 
     function switchMode(modeName) {
@@ -355,13 +523,134 @@ ApplicationWindow {
         return { min: minValue, max: maxValue }
     }
 
-    function contourColor(value, minValue, maxValue, alpha) {
-        var t = (value - minValue) / Math.max(1e-12, maxValue - minValue)
+    function contourPaletteStops() {
+        return [
+            { position: 0.00, color: "#000080" },
+            { position: 0.15, color: "#0000FF" },
+            { position: 0.30, color: "#00FFFF" },
+            { position: 0.45, color: "#00FF00" },
+            { position: 0.60, color: "#FFFF00" },
+            { position: 0.75, color: "#FF9900" },
+            { position: 1.00, color: "#FF0000" }
+        ]
+    }
+
+    function hexToRgb(color) {
+        var text = String(color || "#000000")
+        if (text.length !== 7 || text.charAt(0) !== "#") {
+            text = "#000000"
+        }
+        return {
+            r: parseInt(text.substring(1, 3), 16),
+            g: parseInt(text.substring(3, 5), 16),
+            b: parseInt(text.substring(5, 7), 16)
+        }
+    }
+
+    function interpolateColor(colorA, colorB, t, alpha) {
         t = Math.max(0.0, Math.min(1.0, t))
-        var r = Math.round(42 + 213 * t)
-        var g = Math.round(123 + 88 * (1.0 - Math.abs(t - 0.5) * 2.0))
-        var b = Math.round(235 - 180 * t)
-        return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")"
+        var a = root.hexToRgb(colorA)
+        var b = root.hexToRgb(colorB)
+        var red = Math.round(a.r + (b.r - a.r) * t)
+        var green = Math.round(a.g + (b.g - a.g) * t)
+        var blue = Math.round(a.b + (b.b - a.b) * t)
+        var aText = alpha === undefined ? 1.0 : alpha
+        return "rgba(" + red + ", " + green + ", " + blue + ", " + aText + ")"
+    }
+
+    function contourColor(value, minValue, maxValue, alpha) {
+        var ratio = 0.5
+        if (Math.abs(maxValue - minValue) > 1.0e-12) {
+            ratio = (value - minValue) / (maxValue - minValue)
+        }
+        ratio = Math.max(0.0, Math.min(1.0, ratio))
+        var stops = root.contourPaletteStops()
+        for (var i = 0; i < stops.length - 1; i++) {
+            var left = stops[i]
+            var right = stops[i + 1]
+            if (ratio <= right.position || i === stops.length - 2) {
+                var localSpan = Math.max(1.0e-12, right.position - left.position)
+                var localT = (ratio - left.position) / localSpan
+                return root.interpolateColor(left.color, right.color, localT, alpha)
+            }
+        }
+        return root.interpolateColor(stops[stops.length - 1].color, stops[stops.length - 1].color, 1.0, alpha)
+    }
+
+    function formatScientific(value) {
+        return Number(value || 0.0).toExponential(4)
+    }
+
+    function contourScaleText(scaleValue) {
+        var factor = Number(scaleValue || 1.0)
+        if (!isFinite(factor) || factor <= 0.0) {
+            factor = 1.0
+        }
+        return factor.toFixed(3)
+    }
+
+    function drawColorLegend(ctx, x, y, width, height, minValue, maxValue, title, unitLabel) {
+        ctx.save()
+        ctx.fillStyle = "#F8FAFC"
+        ctx.fillRect(x, y, width, height)
+        ctx.strokeStyle = "#CBD5E1"
+        ctx.lineWidth = 1
+        ctx.strokeRect(x, y, width, height)
+
+        var barWidth = Math.max(18, width * 0.32)
+        var barX = x + 18
+        var barY = y + 28
+        var barHeight = Math.max(40, height - 56)
+        var sampleCount = 96
+        for (var i = 0; i < sampleCount; i++) {
+            var t0 = i / sampleCount
+            var t1 = (i + 1) / sampleCount
+            var yy = barY + (1.0 - t1) * barHeight
+            var hh = Math.max(1.0, (t1 - t0) * barHeight + 1.0)
+            var scalar = minValue + (maxValue - minValue) * t0
+            ctx.fillStyle = root.contourColor(scalar, minValue, maxValue, 1.0)
+            ctx.fillRect(barX, yy, barWidth, hh)
+        }
+        ctx.strokeStyle = "#334155"
+        ctx.lineWidth = 1
+        ctx.strokeRect(barX, barY, barWidth, barHeight)
+
+        ctx.fillStyle = "#0F172A"
+        ctx.font = "bold 13px 'Microsoft YaHei UI'"
+        ctx.fillText(title, x + 18, y + 16)
+        if (unitLabel !== "") {
+            ctx.fillStyle = "#64748B"
+            ctx.font = "12px 'Microsoft YaHei UI'"
+            ctx.fillText(unitLabel, x + 18, y + height - 10)
+        }
+
+        var tickCount = 7
+        ctx.font = "12px 'Consolas'"
+        ctx.fillStyle = "#334155"
+        ctx.strokeStyle = "#64748B"
+        for (var tick = 0; tick <= tickCount; tick++) {
+            var ratio = tick / tickCount
+            var ty = barY + (1.0 - ratio) * barHeight
+            var value = minValue + (maxValue - minValue) * ratio
+            ctx.beginPath()
+            ctx.moveTo(barX + barWidth, ty)
+            ctx.lineTo(barX + barWidth + 8, ty)
+            ctx.stroke()
+            ctx.fillText(root.formatScientific(value), barX + barWidth + 12, ty + 4)
+        }
+        ctx.restore()
+    }
+
+    function drawContourDialogBackground(ctx, width, height) {
+        ctx.save()
+        ctx.fillStyle = "#E2E8F0"
+        ctx.fillRect(0, 0, width, height)
+        ctx.fillStyle = "#F8FAFC"
+        ctx.fillRect(12, 12, width - 24, height - 24)
+        ctx.strokeStyle = "#CBD5E1"
+        ctx.lineWidth = 1
+        ctx.strokeRect(12, 12, width - 24, height - 24)
+        ctx.restore()
     }
 
     function geometryBoundsFromPoints(points) {
@@ -499,7 +788,9 @@ ApplicationWindow {
         var maxDrawW = viewport.width * 0.68
         var maxDrawH = viewport.height * 0.62
         var drawScale = Math.min(maxDrawW / modelW, maxDrawH / modelH) * root.viewportScale
-        drawScale = Math.max(48.0, drawScale)
+        // 上一版 1% 视图对应的最小绘制尺度是 48。
+        // 现在将该大小标定为 100%，并让绘制尺度随 viewportScale 线性缩放。
+        drawScale = Math.max(48.0 * (root.viewportScale / root.viewportScaleDisplayBase), drawScale)
         root.sketchDrawScale = drawScale
         root.lastModelBoundsW = modelW * drawScale
         root.lastModelBoundsH = modelH * drawScale
@@ -1255,9 +1546,120 @@ ApplicationWindow {
         id: materialEditorDialog
         title: "材料编辑器"
         modal: true
-        width: 540
-        height: 520
+        parent: Overlay.overlay
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: Math.min(620, root.width - 80)
+        height: Math.min(540, root.height - 80)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
+
+        ScrollView {
+            anchors.fill: parent
+            anchors.margins: 16
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+            ColumnLayout {
+                width: Math.max(0, materialEditorDialog.width - 32)
+                spacing: 10
+
+                Label {
+                    text: "当前材料"
+                    color: "#1F2937"
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+
+                TextArea {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 160
+                    readOnly: true
+                    text: bridge.materialRowsPreview
+                    wrapMode: Text.WordWrap
+                }
+
+                ComboBox {
+                    id: materialEditCombo
+                    Layout.fillWidth: true
+                    model: bridge.materialOptions
+                }
+
+                FormField { id: materialNameField; Layout.fillWidth: true; label: "材料名称"; text: "new_material" }
+                FormField {
+                    id: materialEField
+                    Layout.fillWidth: true
+                    label: "弹性模量 (Pa)"
+                    text: "210000000000"
+                    suffix: "Pa"
+                    placeholderText: "例如 210e9（钢约 210 GPa）"
+                }
+                FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
+                FormField { id: materialUnitWeightField; Layout.fillWidth: true; label: "容重 (N/m³)"; text: "0.0" }
+                FormField { id: materialColorField; Layout.fillWidth: true; label: "颜色"; text: "#8FB7D8" }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "弹性模量当前按 Pa 录入；210 GPa 请填写 210e9 或 210000000000。"
+                    color: "#64748B"
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 12
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    PrimaryButton {
+                        text: "新增材料"
+                        onClicked: bridge.addMaterial(
+                            materialNameField.text,
+                            Number(materialEField.text),
+                            Number(materialNuField.text),
+                            materialColorField.text,
+                            Number(materialUnitWeightField.text)
+                        )
+                    }
+                    SecondaryButton {
+                        text: "更新选中"
+                        onClicked: bridge.updateMaterial(
+                            root.parseMaterialIdFromOption(materialEditCombo.currentText),
+                            materialNameField.text,
+                            Number(materialEField.text),
+                            Number(materialNuField.text),
+                            materialColorField.text,
+                            Number(materialUnitWeightField.text)
+                        )
+                    }
+                    SecondaryButton {
+                        text: "删除选中"
+                        onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(materialEditCombo.currentText))
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: deformationPlotDialog
+        title: "显示变形示意图"
+        modal: true
+        parent: Overlay.overlay
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: Math.min(980, root.width - 80)
+        height: Math.min(700, root.height - 80)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        standardButtons: Dialog.Ok
+        onOpened: {
+            root.resultOverlayMode = "deformed"
+            root.repaintViewport()
+        }
+        onClosed: {
+            root.resultOverlayMode = "none"
+            root.repaintViewport()
+        }
 
         ColumnLayout {
             anchors.fill: parent
@@ -1265,56 +1667,61 @@ ApplicationWindow {
             spacing: 10
 
             Label {
-                text: "当前材料"
-                color: "#1F2937"
-                font.pixelSize: 14
-                font.bold: true
+                text: "原始网格与变形后网格对比"
+                color: "#334155"
+                font.pixelSize: 13
             }
-
-            TextArea {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 160
-                readOnly: true
-                text: bridge.materialRowsPreview
-                wrapMode: Text.WordWrap
-            }
-
-            ComboBox {
-                id: materialEditCombo
-                Layout.fillWidth: true
-                model: bridge.materialOptions
-            }
-
-            FormField { id: materialNameField; Layout.fillWidth: true; label: "材料名称"; text: "new_material" }
-            FormField { id: materialEField; Layout.fillWidth: true; label: "弹性模量"; text: "210000000000" }
-            FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
-            FormField { id: materialColorField; Layout.fillWidth: true; label: "颜色"; text: "#8FB7D8" }
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 8
-                PrimaryButton {
-                    text: "新增材料"
-                    onClicked: bridge.addMaterial(
-                        materialNameField.text,
-                        Number(materialEField.text),
-                        Number(materialNuField.text),
-                        materialColorField.text
-                    )
+                Layout.fillHeight: true
+                spacing: 12
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 12
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: root.deformationPreviewImageSource()
+                    }
                 }
-                SecondaryButton {
-                    text: "更新选中"
-                    onClicked: bridge.updateMaterial(
-                        root.parseMaterialIdFromOption(materialEditCombo.currentText),
-                        materialNameField.text,
-                        Number(materialEField.text),
-                        Number(materialNuField.text),
-                        materialColorField.text
-                    )
-                }
-                SecondaryButton {
-                    text: "删除选中"
-                    onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(materialEditCombo.currentText))
+
+                Rectangle {
+                    Layout.preferredWidth: 240
+                    Layout.fillHeight: true
+                    radius: 12
+                    color: "#FFFFFF"
+                    border.color: "#D3DCE8"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        Label { text: "显示控制"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
+                        CheckBox { id: deformationShowMeshBox; text: "显示网格线"; checked: true }
+                        CheckBox { id: deformationShowDeformedBox; text: "显示变形后轮廓"; checked: true }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Max |u| = " + root.formatScientific(((root.deformationPlotData().summary || {}).max_displacement || 0.0))
+                            color: "#334155"
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "缓存目录：\n" + bridge.contourImageCacheDir
+                            color: "#64748B"
+                            wrapMode: Text.WordWrap
+                        }
+                        Item { Layout.fillHeight: true }
+                    }
                 }
             }
         }
@@ -1324,139 +1731,118 @@ ApplicationWindow {
         id: displacementContourDialog
         title: "显示位移云图"
         modal: true
-        width: 760
-        height: 620
+        parent: Overlay.overlay
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: Math.min(1040, root.width - 60)
+        height: Math.min(720, root.height - 60)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
-        onOpened: {
-            var data = root.displacementContourData()
-            displacementScaleField.text = String(data.default_scale_factor || 1.0)
-            root.resultOverlayMode = "deformed"
-            displacementContourCanvas.requestPaint()
-            root.repaintViewport()
-        }
-        onClosed: {
-            root.resultOverlayMode = "none"
-            root.repaintViewport()
-        }
+        onOpened: {}
 
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
             spacing: 10
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                FormField {
-                    id: displacementScaleField
-                    Layout.preferredWidth: 180
-                    label: "放大系数"
-                    text: "1.0"
-                }
-                Button {
-                    text: "刷新"
-                    onClicked: displacementContourCanvas.requestPaint()
-                }
-                Button {
-                    text: "导出位移云图数据"
-                    onClicked: bridge.exportDisplacementContourData("outputs/latest")
-                }
-                Item { Layout.fillWidth: true }
+            Label {
+                text: "位移幅值 |u| 彩色渐变云图"
+                color: "#334155"
+                font.pixelSize: 13
             }
 
-            Canvas {
-                id: displacementContourCanvas
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    ctx.fillStyle = "#F8FAFC"
-                    ctx.fillRect(0, 0, width, height)
+                spacing: 12
 
-                    var data = root.displacementContourData()
-                    var nodes = data.nodes || []
-                    var elements = data.elements || []
-                    if (nodes.length === 0 || elements.length === 0) {
-                        ctx.fillStyle = "#334155"
-                        ctx.font = "14px 'Microsoft YaHei UI'"
-                        ctx.fillText("请先求解。", 20, 36)
-                        return
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 12
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: root.displacementContourImageSource()
                     }
+                }
 
-                    var factor = Number(displacementScaleField.text)
-                    if (!isFinite(factor) || factor <= 0.0) {
-                        factor = 1.0
+                Rectangle {
+                    Layout.preferredWidth: 270
+                    Layout.fillHeight: true
+                    radius: 12
+                    color: "#FFFFFF"
+                    border.color: "#D3DCE8"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
+                        CheckBox {
+                            id: displacementShowMeshBox
+                            text: "显示网格线"
+                            checked: true
+                        }
+                        CheckBox {
+                            id: displacementShowDeformedBox
+                            text: "显示变形后轮廓"
+                            checked: true
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Button {
+                                text: "导出位移云图数据"
+                                onClicked: bridge.exportDisplacementContourData("outputs/latest")
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Min = " + root.formatScientific(Number((root.displacementContourData().min_displacement || 0.0)))
+                            color: "#334155"
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Max = " + root.formatScientific(Number((root.displacementContourData().max_displacement || 0.0)))
+                            color: "#334155"
+                            wrapMode: Text.WordWrap
+                        }
+                        Item { Layout.fillHeight: true }
                     }
+                }
+            }
 
-                    var originalPoints = []
-                    var deformedPoints = []
-                    var originalMap = {}
-                    var deformedMap = {}
-                    var displacementNodeMap = {}
-                    for (var i = 0; i < nodes.length; i++) {
-                        var node = nodes[i]
-                        var original = { x: node.x, y: node.y }
-                        var deformed = { x: node.x + node.ux * factor, y: node.y + node.uy * factor }
-                        originalPoints.push(original)
-                        deformedPoints.push(deformed)
-                        originalMap[node.id] = original
-                        deformedMap[node.id] = deformed
-                        displacementNodeMap[node.id] = node
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 56
+                radius: 10
+                color: "#F8FAFC"
+                border.color: "#D3DCE8"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        text: "位移云图 | Min = " + root.formatScientific(Number((root.displacementContourData().min_displacement || 0.0)))
+                              + " | Max = " + root.formatScientific(Number((root.displacementContourData().max_displacement || 0.0)))
+                        color: "#475569"
+                        elide: Text.ElideRight
                     }
-
-                    var transform = root.canvasTransformForPoints(originalPoints.concat(deformedPoints), width, height, 24)
-                    var minDisplacement = Number(data.min_displacement || 0.0)
-                    var maxDisplacement = Number(data.max_displacement || 0.0)
-
-                    for (var j = 0; j < elements.length; j++) {
-                        var tri = elements[j].node_ids
-                        var aNode = displacementNodeMap[tri[0]]
-                        var bNode = displacementNodeMap[tri[1]]
-                        var cNode = displacementNodeMap[tri[2]]
-                        var a = root.canvasPoint(transform, { x: aNode.x + aNode.ux * factor, y: aNode.y + aNode.uy * factor })
-                        var b = root.canvasPoint(transform, { x: bNode.x + bNode.ux * factor, y: bNode.y + bNode.uy * factor })
-                        var c = root.canvasPoint(transform, { x: cNode.x + cNode.ux * factor, y: cNode.y + cNode.uy * factor })
-                        a.value = aNode.u
-                        b.value = bNode.u
-                        c.value = cNode.u
-                        root.drawInterpolatedTriangleContour(ctx, a, b, c, minDisplacement, maxDisplacement, 12)
+                    Label {
+                        text: "缓存切换"
+                        color: "#64748B"
                     }
-
-                    ctx.strokeStyle = "rgba(15, 23, 42, 0.12)"
-                    ctx.lineWidth = 0.7
-                    for (var k = 0; k < elements.length; k++) {
-                        var originalIds = elements[k].node_ids
-                        var oa = root.canvasPoint(transform, originalMap[originalIds[0]])
-                        var ob = root.canvasPoint(transform, originalMap[originalIds[1]])
-                        var oc = root.canvasPoint(transform, originalMap[originalIds[2]])
-                        ctx.beginPath()
-                        ctx.moveTo(oa.x, oa.y)
-                        ctx.lineTo(ob.x, ob.y)
-                        ctx.lineTo(oc.x, oc.y)
-                        ctx.closePath()
-                        ctx.stroke()
-                    }
-
-                    ctx.strokeStyle = "#7C3AED"
-                    ctx.lineWidth = 1.1
-                    for (var m = 0; m < elements.length; m++) {
-                        var ids = elements[m].node_ids
-                        var da = root.canvasPoint(transform, deformedMap[ids[0]])
-                        var db = root.canvasPoint(transform, deformedMap[ids[1]])
-                        var dc = root.canvasPoint(transform, deformedMap[ids[2]])
-                        ctx.beginPath()
-                        ctx.moveTo(da.x, da.y)
-                        ctx.lineTo(db.x, db.y)
-                        ctx.lineTo(dc.x, dc.y)
-                        ctx.closePath()
-                        ctx.stroke()
-                    }
-
-                    ctx.fillStyle = "#334155"
-                    ctx.font = "13px 'Microsoft YaHei UI'"
-                    ctx.fillText("min = " + minDisplacement.toExponential(4), 20, 28)
-                    ctx.fillText("max = " + maxDisplacement.toExponential(4), 20, 50)
                 }
             }
         }
@@ -1464,105 +1850,130 @@ ApplicationWindow {
 
     Dialog {
         id: stressContourDialog
-        title: "显示 Von Mises 云图"
+        title: "显示应力云图"
         modal: true
-        width: 760
-        height: 620
+        parent: Overlay.overlay
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: Math.min(1040, root.width - 60)
+        height: Math.min(720, root.height - 60)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
-        onOpened: {
-            root.resultOverlayMode = "vonMises"
-            stressContourCanvas.requestPaint()
-            root.repaintViewport()
-        }
-        onClosed: {
-            root.resultOverlayMode = "none"
-            root.repaintViewport()
-        }
+        onOpened: {}
 
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
             spacing: 10
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                ComboBox {
-                    id: stressContourModeCombo
-                    Layout.preferredWidth: 180
-                    model: ["精确模式", "平滑模式"]
-                    onActivated: stressContourCanvas.requestPaint()
-                }
-                Button {
-                    text: "导出应力云图数据"
-                    onClicked: bridge.exportStressContourData("outputs/latest")
-                }
-                Item { Layout.fillWidth: true }
+            Label {
+                text: "Von Mises 应力云图"
+                color: "#334155"
+                font.pixelSize: 13
             }
 
-            Canvas {
-                id: stressContourCanvas
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    ctx.fillStyle = "#F8FAFC"
-                    ctx.fillRect(0, 0, width, height)
+                spacing: 12
 
-                    var data = root.stressContourData()
-                    var nodes = data.nodes || []
-                    var elements = data.elements || []
-                    if (nodes.length === 0 || elements.length === 0) {
-                        ctx.fillStyle = "#334155"
-                        ctx.font = "14px 'Microsoft YaHei UI'"
-                        ctx.fillText("请先求解。", 20, 36)
-                        return
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 12
+                    color: "#F8FAFC"
+                    border.color: "#D3DCE8"
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: root.stressContourImageSource()
                     }
+                }
 
-                    var nodeMap = {}
-                    for (var i = 0; i < nodes.length; i++) {
-                        nodeMap[nodes[i].id] = nodes[i]
-                    }
-                    var transform = root.canvasTransformForPoints(nodes, width, height, 24)
-                    var exactMode = stressContourModeCombo.currentIndex === 0
-                    var minValue = exactMode ? Number(data.min_von_mises || 0.0) : Number(data.min_smoothed_von_mises || 0.0)
-                    var maxValue = exactMode ? Number(data.max_von_mises || 0.0) : Number(data.max_smoothed_von_mises || 0.0)
+                Rectangle {
+                    Layout.preferredWidth: 290
+                    Layout.fillHeight: true
+                    radius: 12
+                    color: "#FFFFFF"
+                    border.color: "#D3DCE8"
 
-                    for (var j = 0; j < elements.length; j++) {
-                        var row = elements[j]
-                        var ids = row.node_ids
-                        var a = root.canvasPoint(transform, nodeMap[ids[0]])
-                        var b = root.canvasPoint(transform, nodeMap[ids[1]])
-                        var c = root.canvasPoint(transform, nodeMap[ids[2]])
-                        if (exactMode) {
-                            ctx.beginPath()
-                            ctx.moveTo(a.x, a.y)
-                            ctx.lineTo(b.x, b.y)
-                            ctx.lineTo(c.x, c.y)
-                            ctx.closePath()
-                            ctx.fillStyle = root.contourColor(row.element_von_mises, minValue, maxValue, 0.88)
-                            ctx.fill()
-                        } else {
-                            a.value = row.nodal_smoothed_von_mises[0]
-                            b.value = row.nodal_smoothed_von_mises[1]
-                            c.value = row.nodal_smoothed_von_mises[2]
-                            root.drawInterpolatedTriangleContour(ctx, a, b, c, minValue, maxValue, 12)
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
+                        ComboBox {
+                            id: stressContourModeCombo
+                            Layout.fillWidth: true
+                            model: ["精确模式（单元常值）", "平滑模式（节点平均）"]
                         }
-                        ctx.strokeStyle = "rgba(15, 23, 42, 0.18)"
-                        ctx.lineWidth = 0.8
-                        ctx.beginPath()
-                        ctx.moveTo(a.x, a.y)
-                        ctx.lineTo(b.x, b.y)
-                        ctx.lineTo(c.x, c.y)
-                        ctx.closePath()
-                        ctx.stroke()
+                        CheckBox {
+                            id: stressShowMeshBox
+                            text: "显示网格线"
+                            checked: true
+                        }
+                        CheckBox {
+                            id: stressShowDeformedBox
+                            text: "显示变形后轮廓"
+                            checked: true
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Button {
+                                text: "导出应力云图数据"
+                                onClicked: bridge.exportStressContourData("outputs/latest")
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Min = " + root.formatScientific(stressContourModeCombo.currentIndex === 0
+                                  ? Number((root.stressContourExactData().min_von_mises || 0.0))
+                                  : Number((root.stressContourSmoothData().min_von_mises || 0.0)))
+                            color: "#334155"
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Max = " + root.formatScientific(stressContourModeCombo.currentIndex === 0
+                                  ? Number((root.stressContourExactData().max_von_mises || 0.0))
+                                  : Number((root.stressContourSmoothData().max_von_mises || 0.0)))
+                            color: "#334155"
+                            wrapMode: Text.WordWrap
+                        }
+                        Item { Layout.fillHeight: true }
                     }
+                }
+            }
 
-                    ctx.fillStyle = "#334155"
-                    ctx.font = "13px 'Microsoft YaHei UI'"
-                    ctx.fillText("min = " + minValue.toExponential(4), 20, 28)
-                    ctx.fillText("max = " + maxValue.toExponential(4), 20, 50)
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 56
+                radius: 10
+                color: "#F8FAFC"
+                border.color: "#D3DCE8"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        text: stressContourModeCombo.currentIndex === 0
+                              ? "应力云图 | 精确模式（单元常值） | Max = " + root.formatScientific(Number((root.stressContourExactData().max_von_mises || 0.0)))
+                              : "应力云图 | 平滑模式（节点平均） | Max = " + root.formatScientific(Number((root.stressContourSmoothData().max_von_mises || 0.0)))
+                        color: "#475569"
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        text: "单位：Pa"
+                        color: "#64748B"
+                    }
                 }
             }
         }
@@ -1661,10 +2072,10 @@ ApplicationWindow {
 
                     Item { Layout.fillWidth: true }
 
-                    Button { text: "新建工程"; onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false } }
-                    Button { text: "打开工程"; onClicked: openProjectDialog.open() }
-                    Button { text: "保存工程"; onClicked: root.saveCurrentProjectWithDialogFallback() }
-                    Button { text: "另存为"; onClicked: saveProjectDialog.open() }
+                    Button { text: "新建工程"; enabled: !bridge.isBusy; onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false } }
+                    Button { text: "打开工程"; enabled: !bridge.isBusy; onClicked: openProjectDialog.open() }
+                    Button { text: "保存工程"; enabled: !bridge.isBusy; onClicked: root.saveCurrentProjectWithDialogFallback() }
+                    Button { text: "另存为"; enabled: !bridge.isBusy; onClicked: saveProjectDialog.open() }
                 }
             }
 
@@ -1675,17 +2086,22 @@ ApplicationWindow {
                 spacing: 0
 
                 ScrollView {
+                    id: leftPanelScroll
+                    Layout.minimumWidth: root.leftPanelWidth
                     Layout.preferredWidth: root.leftPanelWidth
+                    Layout.maximumWidth: root.leftPanelWidth
                     Layout.fillHeight: true
                     clip: true
+                    focusPolicy: Qt.NoFocus
                     ScrollBar.vertical.policy: ScrollBar.AlwaysOff
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                     Rectangle {
-                        width: root.leftPanelWidth
+                        width: leftPanelScroll.availableWidth > 0 ? leftPanelScroll.availableWidth : root.leftPanelWidth
                         color: "#F8FAFC"
                         border.color: "#D3DCE8"
                         implicitHeight: leftPanelColumn.implicitHeight + 32
+                        clip: true
 
                         ColumnLayout {
                             id: leftPanelColumn
@@ -1722,20 +2138,66 @@ ApplicationWindow {
                             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                             Label { text: "当前选择"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                            Text { Layout.fillWidth: true; text: "类型：" + selectedObjectType; color: "#334155"; wrapMode: Text.WordWrap }
-                            Text { Layout.fillWidth: true; text: "名称：" + selectedObjectName; color: "#334155"; wrapMode: Text.WordWrap }
-                            Text { Layout.fillWidth: true; text: selectedObjectDescription; color: "#64748B"; wrapMode: Text.WordWrap }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 88
+                                radius: 10
+                                color: "#FFFFFF"
+                                border.color: "#D3DCE8"
+                                clip: true
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 4
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "类型：" + root.shortSelectionTypeText()
+                                        color: "#334155"
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "名称：" + root.shortSelectionNameText()
+                                        color: "#334155"
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.shortSelectionDetailText()
+                                        color: "#64748B"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
                             Button { text: "清空选择"; onClicked: root.clearSelection() }
 
                             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                             Label { text: "模型概览"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                            Text { text: "点数：" + bridge.modelPointCount; color: "#334155" }
-                            Text { text: "边数：" + bridge.modelEdgeCount; color: "#334155" }
-                            Text { text: "闭合面数：" + bridge.modelFaceCount; color: "#334155" }
-                            Text { text: "网格节点：" + bridge.sketchMeshNodeCount; color: "#334155" }
-                            Text { text: "网格单元：" + bridge.sketchMeshElementCount; color: "#334155" }
-                            Text { text: "状态：" + bridge.statusText; color: "#64748B"; wrapMode: Text.WordWrap }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 126
+                                radius: 10
+                                color: "#FFFFFF"
+                                border.color: "#D3DCE8"
+                                clip: true
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 4
+
+                                    Text { text: "点：" + bridge.modelPointCount; color: "#334155" }
+                                    Text { text: "边：" + bridge.modelEdgeCount; color: "#334155" }
+                                    Text { text: "面：" + bridge.modelFaceCount; color: "#334155" }
+                                    Text { text: "网格：" + bridge.sketchMeshNodeCount + " 节点 / " + bridge.sketchMeshElementCount + " 单元"; color: "#334155"; elide: Text.ElideRight }
+                                    Text { text: root.leftPanelResultStatusText(); color: "#64748B" }
+                                }
+                            }
                         }
                     }
                 }
@@ -1768,9 +2230,9 @@ ApplicationWindow {
                                 spacing: 8
                                 Label { text: "视口"; font.pixelSize: 15; font.bold: true; color: "#0F172A" }
                                 Item { Layout.fillWidth: true }
-                                Button { text: "适配视图"; onClicked: { root.viewportScale = 1.0; root.viewportOffsetX = 0.0; root.viewportOffsetY = 0.0; root.repaintViewport() } }
-                                Button { text: "放大"; onClicked: { root.viewportScale *= 1.15; root.repaintViewport() } }
-                                Button { text: "缩小"; onClicked: { root.viewportScale /= 1.15; root.repaintViewport() } }
+                                Button { text: "适配视图"; onClicked: root.resetViewportTransform() }
+                                Button { text: "放大"; onClicked: root.zoomViewportBy(1.15) }
+                                Button { text: "缩小"; onClicked: root.zoomViewportBy(1.0 / 1.15) }
                             }
                         }
 
@@ -1891,17 +2353,36 @@ ApplicationWindow {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 42
+                            Layout.preferredHeight: 56
                             color: "#FFFFFF"
                             border.color: "#D3DCE8"
+                            clip: true
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 12
                                 anchors.rightMargin: 12
                                 spacing: 10
-                                Label { text: "提示：" + (root.viewportHint === "" ? bridge.statusText : root.viewportHint); color: "#475569"; font.pixelSize: 12 }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: "提示：" + root.bottomStatusPrimaryText()
+                                        color: "#475569"
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: root.bottomStatusSecondaryText()
+                                        color: "#64748B"
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                }
                                 Item { Layout.fillWidth: true }
-                                Label { text: "缩放：" + Math.round(root.viewportScale * 100) + "%"; color: "#64748B"; font.pixelSize: 12 }
+                                Label { text: "缩放：" + root.viewportScaleText(); color: "#64748B"; font.pixelSize: 12 }
                             }
                         }
                     }
@@ -1914,14 +2395,18 @@ ApplicationWindow {
                 }
 
                 ScrollView {
+                    id: rightPanelScroll
+                    Layout.minimumWidth: root.rightPanelWidth
                     Layout.preferredWidth: root.rightPanelWidth
+                    Layout.maximumWidth: root.rightPanelWidth
                     Layout.fillHeight: true
                     clip: true
+                    focusPolicy: Qt.NoFocus
                     ScrollBar.vertical.policy: ScrollBar.AlwaysOff
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                     Rectangle {
-                        width: root.rightPanelWidth
+                        width: rightPanelScroll.availableWidth > 0 ? rightPanelScroll.availableWidth : root.rightPanelWidth
                         color: "#FFFFFF"
                         border.color: "#D3DCE8"
                         implicitHeight: rightPanelColumn.implicitHeight + 32
@@ -1970,10 +2455,7 @@ ApplicationWindow {
                                                 root.viewportPanMode = false
                                                 root.isPanningViewport = false
                                                 root.isPanning = false
-                                                root.viewportOffsetX = 0.0
-                                                root.viewportOffsetY = 0.0
-                                                root.viewportScale = 1.0
-                                                root.repaintViewport()
+                                                root.resetViewportTransform()
                                             }
                                         }
                                     }
@@ -2093,8 +2575,8 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "生成网格"; onClicked: bridge.generateMesh(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
-                                        Button { text: "清除网格"; onClicked: bridge.clearMesh() }
+                                        Button { text: "生成网格"; enabled: !bridge.isBusy; onClicked: bridge.generateMeshAsync(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
+                                        Button { text: "清除网格"; enabled: !bridge.isBusy; onClicked: bridge.clearMesh() }
                                     }
                                     Text { text: "网格后端状态：" + (bridge.currentMeshType === "none" ? "未生成" : bridge.currentMeshType); color: "#334155" }
                                     Text { text: "节点数：" + bridge.sketchMeshNodeCount; color: "#334155" }
@@ -2124,6 +2606,19 @@ ApplicationWindow {
                                         wrapMode: Text.WordWrap
                                         text: bridge.selectedTargetType === "" ? "当前目标：未选择" : "当前目标：" + bridge.selectedTargetType + " | " + bridge.selectedTargetId
                                         color: "#334155"
+                                    }
+
+                                    CheckBox {
+                                        id: gravityEnabledBox
+                                        text: "求解时考虑自重"
+                                        checked: bridge.gravityEnabled
+                                        onToggled: bridge.setGravityEnabled(checked)
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "重力方向：竖直向下"
+                                        color: "#64748B"
+                                        wrapMode: Text.WordWrap
                                     }
 
                                     CheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }
@@ -2217,20 +2712,30 @@ ApplicationWindow {
                                     spacing: 8
 
                                     Label { text: "求解结果"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Button { text: "求解当前模型"; onClicked: bridge.solveCurrentModel() }
+                                    Button { text: "求解当前模型"; enabled: !bridge.isBusy; onClicked: bridge.solveCurrentModelAsync() }
                                     Text { text: "求解状态：" + bridge.statusText; color: "#334155"; wrapMode: Text.WordWrap }
                                     Text { text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155" }
                                     Text { text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155" }
                                     Text { text: "Warning 数量：" + bridge.warningCount; color: "#334155" }
+                                    Text { text: "云图缓存：" + (bridge.contourCacheValid ? bridge.contourCacheSummaryText : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
+                                    Text { text: "图片缓存：" + (bridge.contourImageCacheValid ? bridge.contourImageCacheDir : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
 
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
                                         Button {
+                                            text: "显示变形示意图"
+                                            onClicked: {
+                                                if (!root.ensureContourImageCacheAvailable()) {
+                                                    return
+                                                }
+                                                deformationPlotDialog.open()
+                                            }
+                                        }
+                                        Button {
                                             text: "显示位移云图"
                                             onClicked: {
-                                                if (!bridge.hasSolution) {
-                                                    root.viewportHint = "请先求解。"
+                                                if (!root.ensureContourImageCacheAvailable()) {
                                                     return
                                                 }
                                                 displacementContourDialog.open()
@@ -2239,8 +2744,7 @@ ApplicationWindow {
                                         Button {
                                             text: "显示应力云图"
                                             onClicked: {
-                                                if (!bridge.hasSolution) {
-                                                    root.viewportHint = "请先求解。"
+                                                if (!root.ensureContourImageCacheAvailable()) {
                                                     return
                                                 }
                                                 stressContourDialog.open()
@@ -2264,12 +2768,159 @@ ApplicationWindow {
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "导出"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Button { text: "导出节点结果"; onClicked: bridge.exportNodeResults("outputs/latest") }
+                                    Button { text: "导出单元结果"; onClicked: bridge.exportElementResults("outputs/latest") }
                                     Button { text: "导出位移云图数据"; onClicked: bridge.exportDisplacementContourData("outputs/latest") }
                                     Button { text: "导出应力云图数据"; onClicked: bridge.exportStressContourData("outputs/latest") }
                                     Button { text: "导出全部结果"; onClicked: bridge.exportResults("outputs/latest") }
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        id: busyOverlay
+        anchors.fill: parent
+        visible: bridge.isBusy
+        color: "#66000000"
+        z: 9999
+        property real flowOffset: -0.4
+        property real busyVisualProgress: 0
+        property double busyStartMs: 0
+        property bool busyWasActive: false
+
+        NumberAnimation on flowOffset {
+            running: busyOverlay.visible && bridge.busyProgressMode === "indeterminate"
+            loops: Animation.Infinite
+            from: -0.4
+            to: 1.2
+            duration: 1300
+        }
+
+        Timer {
+            id: fakeProgressTimer
+            interval: 16
+            repeat: true
+            running: bridge.isBusy && bridge.busyProgressMode === "fake_determinate"
+            onTriggered: {
+                var now = Date.now()
+                var elapsed = now - busyOverlay.busyStartMs
+                busyOverlay.busyVisualProgress = root.fakeProgressAt(
+                    elapsed,
+                    bridge.busyEstimatedMs,
+                    bridge.busyHoldProgress
+                )
+            }
+        }
+
+        Connections {
+            target: bridge
+
+            function onBusyStateChanged() {
+                if (bridge.isBusy) {
+                    if (!busyOverlay.busyWasActive && bridge.busyProgressMode === "fake_determinate") {
+                        busyOverlay.busyStartMs = Date.now()
+                        busyOverlay.busyVisualProgress = 0
+                    } else if (bridge.busyProgressMode === "determinate") {
+                        busyOverlay.busyVisualProgress = bridge.busyProgress
+                    }
+                    busyOverlay.busyWasActive = true
+                } else {
+                    busyOverlay.busyVisualProgress = 0
+                    busyOverlay.busyWasActive = false
+                }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: busyOverlay.visible
+        }
+
+        Rectangle {
+            width: 420
+            height: 180
+            radius: 12
+            anchors.centerIn: parent
+            color: "#FFFFFF"
+            border.color: "#CBD5E1"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 12
+
+                Label {
+                    text: bridge.busyTitle
+                    font.bold: true
+                    font.pixelSize: 16
+                    color: "#0F172A"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.busyOverlayMessage()
+                    wrapMode: Text.WordWrap
+                    color: "#475569"
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 100
+                    value: bridge.busyProgress
+                    visible: bridge.busyProgressMode === "determinate"
+                }
+
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 100
+                    value: busyOverlay.busyVisualProgress
+                    visible: bridge.busyProgressMode === "fake_determinate"
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 12
+                    visible: bridge.busyProgressMode === "indeterminate"
+                    radius: 6
+                    color: "#E2E8F0"
+                    clip: true
+
+                    Rectangle {
+                        width: parent.width * 0.32
+                        height: parent.height
+                        radius: 6
+                        x: busyOverlay.flowOffset * (parent.width + width) - width
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#93C5FD" }
+                            GradientStop { position: 0.5; color: "#2563EB" }
+                            GradientStop { position: 1.0; color: "#BFDBFE" }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: bridge.busyStage
+                        color: "#64748B"
+                        font.pixelSize: 12
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: bridge.busyProgressMode === "indeterminate"
+                              ? "处理中..."
+                              : ((bridge.busyProgressMode === "fake_determinate"
+                                  ? Math.round(busyOverlay.busyVisualProgress)
+                                  : bridge.busyProgress) + "%")
+                        color: "#0F172A"
+                        font.pixelSize: 12
                     }
                 }
             }
