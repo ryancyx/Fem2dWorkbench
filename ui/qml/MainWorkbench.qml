@@ -70,130 +70,6 @@ ApplicationWindow {
     property int uiButtonHeight: 34
     property int uiButtonCompactHeight: 30
     property int uiButtonHPadding: 12
-    property int uiControlRadius: 9
-
-    component RoundedButton: Button {
-        id: roundedButtonRoot
-        implicitHeight: root.uiButtonHeight
-        leftPadding: root.uiButtonHPadding
-        rightPadding: root.uiButtonHPadding
-        topPadding: 6
-        bottomPadding: 6
-        font.pixelSize: 12
-
-        contentItem: Text {
-            text: roundedButtonRoot.text
-            font: roundedButtonRoot.font
-            color: !roundedButtonRoot.enabled ? "#94A3B8" : (roundedButtonRoot.down ? "#FFFFFF" : "#0F172A")
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-
-        background: Rectangle {
-            implicitHeight: root.uiButtonHeight
-            radius: root.uiControlRadius
-            color: !roundedButtonRoot.enabled
-                   ? "#E5E7EB"
-                   : roundedButtonRoot.down
-                     ? "#2563EB"
-                     : roundedButtonRoot.hovered
-                       ? "#EAF2FF"
-                       : "#F8FAFC"
-            border.color: !roundedButtonRoot.enabled
-                          ? "#CBD5E1"
-                          : roundedButtonRoot.hovered || roundedButtonRoot.activeFocus
-                            ? "#2563EB"
-                            : "#CBD5E1"
-            border.width: roundedButtonRoot.hovered || roundedButtonRoot.activeFocus ? 1.4 : 1.0
-        }
-    }
-
-    component RoundedCheckBox: CheckBox {
-        id: roundedCheckBoxRoot
-        spacing: 8
-        font.pixelSize: 12
-
-        indicator: Rectangle {
-            implicitWidth: 18
-            implicitHeight: 18
-            x: roundedCheckBoxRoot.leftPadding
-            y: Math.round((roundedCheckBoxRoot.height - height) / 2)
-            radius: 5
-            color: roundedCheckBoxRoot.checked ? "#2563EB" : "#FFFFFF"
-            border.color: roundedCheckBoxRoot.hovered || roundedCheckBoxRoot.activeFocus ? "#2563EB" : "#CBD5E1"
-            border.width: 1.2
-
-            Text {
-                anchors.centerIn: parent
-                text: roundedCheckBoxRoot.checked ? "✓" : ""
-                color: "#FFFFFF"
-                font.pixelSize: 13
-                font.bold: true
-            }
-        }
-
-        contentItem: Text {
-            text: roundedCheckBoxRoot.text
-            font: roundedCheckBoxRoot.font
-            color: roundedCheckBoxRoot.enabled ? "#334155" : "#94A3B8"
-            verticalAlignment: Text.AlignVCenter
-            leftPadding: roundedCheckBoxRoot.indicator.width + roundedCheckBoxRoot.spacing
-            elide: Text.ElideRight
-        }
-    }
-
-    component RoundedComboBox: ComboBox {
-        id: roundedComboBoxRoot
-        implicitHeight: root.uiButtonHeight
-        leftPadding: root.uiButtonHPadding
-        rightPadding: 30
-        font.pixelSize: 12
-
-        contentItem: Text {
-            text: roundedComboBoxRoot.displayText
-            font: roundedComboBoxRoot.font
-            color: roundedComboBoxRoot.enabled ? "#0F172A" : "#94A3B8"
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-
-        indicator: Text {
-            x: roundedComboBoxRoot.width - width - 10
-            y: Math.round((roundedComboBoxRoot.height - height) / 2)
-            text: "▾"
-            color: "#64748B"
-            font.pixelSize: 12
-        }
-
-        background: Rectangle {
-            implicitHeight: root.uiButtonHeight
-            radius: root.uiControlRadius
-            color: roundedComboBoxRoot.enabled ? "#FFFFFF" : "#F1F5F9"
-            border.color: roundedComboBoxRoot.hovered || roundedComboBoxRoot.activeFocus ? "#2563EB" : "#CBD5E1"
-            border.width: roundedComboBoxRoot.hovered || roundedComboBoxRoot.activeFocus ? 1.4 : 1.0
-        }
-    }
-
-    component RoundedTextArea: TextArea {
-        id: roundedTextAreaRoot
-        wrapMode: TextEdit.Wrap
-        font.pixelSize: 12
-        color: "#0F172A"
-        selectedTextColor: "#FFFFFF"
-        selectionColor: "#2563EB"
-        leftPadding: 10
-        rightPadding: 10
-        topPadding: 8
-        bottomPadding: 8
-
-        background: Rectangle {
-            radius: root.uiControlRadius
-            color: roundedTextAreaRoot.readOnly ? "#F8FAFC" : "#FFFFFF"
-            border.color: roundedTextAreaRoot.activeFocus ? "#2563EB" : "#CBD5E1"
-            border.width: roundedTextAreaRoot.activeFocus ? 1.4 : 1.0
-        }
-    }
 
     component PanelResizeHandle: Item {
         // Drag resizing is intentionally disabled.
@@ -1702,7 +1578,7 @@ ApplicationWindow {
                     font.bold: true
                 }
 
-                RoundedTextArea {
+                TextArea {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 160
                     readOnly: true
@@ -1710,7 +1586,7 @@ ApplicationWindow {
                     wrapMode: Text.WordWrap
                 }
 
-                RoundedComboBox {
+                ComboBox {
                     id: materialEditCombo
                     Layout.fillWidth: true
                     model: bridge.materialOptions
@@ -1740,7 +1616,7 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    PrimaryRoundedButton {
+                    PrimaryButton {
                         text: "新增材料"
                         onClicked: bridge.addMaterial(
                             materialNameField.text,
@@ -1750,7 +1626,7 @@ ApplicationWindow {
                             Number(materialUnitWeightField.text)
                         )
                     }
-                    SecondaryRoundedButton {
+                    SecondaryButton {
                         text: "更新选中"
                         onClicked: bridge.updateMaterial(
                             root.parseMaterialIdFromOption(materialEditCombo.currentText),
@@ -1761,7 +1637,7 @@ ApplicationWindow {
                             Number(materialUnitWeightField.text)
                         )
                     }
-                    SecondaryRoundedButton {
+                    SecondaryButton {
                         text: "删除选中"
                         onClicked: bridge.deleteMaterial(root.parseMaterialIdFromOption(materialEditCombo.currentText))
                     }
@@ -1836,8 +1712,8 @@ ApplicationWindow {
                         spacing: 10
 
                         Label { text: "显示控制"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        RoundedCheckBox { id: deformationShowMeshBox; text: "显示网格线"; checked: true }
-                        RoundedCheckBox { id: deformationShowDeformedBox; text: "显示变形后轮廓"; checked: true }
+                        CheckBox { id: deformationShowMeshBox; text: "显示网格线"; checked: true }
+                        CheckBox { id: deformationShowDeformedBox; text: "显示变形后轮廓"; checked: true }
                         Text {
                             Layout.fillWidth: true
                             text: "Max |u| = " + root.formatScientific(((root.deformationPlotData().summary || {}).max_displacement || 0.0))
@@ -1916,12 +1792,12 @@ ApplicationWindow {
                         spacing: 10
 
                         Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        RoundedCheckBox {
+                        CheckBox {
                             id: displacementShowMeshBox
                             text: "显示网格线"
                             checked: true
                         }
-                        RoundedCheckBox {
+                        CheckBox {
                             id: displacementShowDeformedBox
                             text: "显示变形后轮廓"
                             checked: true
@@ -1929,7 +1805,7 @@ ApplicationWindow {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            RoundedButton {
+                            Button {
                                 text: "导出位移云图数据"
                                 onClicked: bridge.exportDisplacementContourData("outputs/latest")
                             }
@@ -2037,17 +1913,17 @@ ApplicationWindow {
                         spacing: 10
 
                         Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        RoundedComboBox {
+                        ComboBox {
                             id: stressContourModeCombo
                             Layout.fillWidth: true
                             model: ["精确模式（单元常值）", "平滑模式（节点平均）"]
                         }
-                        RoundedCheckBox {
+                        CheckBox {
                             id: stressShowMeshBox
                             text: "显示网格线"
                             checked: true
                         }
-                        RoundedCheckBox {
+                        CheckBox {
                             id: stressShowDeformedBox
                             text: "显示变形后轮廓"
                             checked: true
@@ -2055,7 +1931,7 @@ ApplicationWindow {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            RoundedButton {
+                            Button {
                                 text: "导出应力云图数据"
                                 onClicked: bridge.exportStressContourData("outputs/latest")
                             }
@@ -2202,7 +2078,7 @@ ApplicationWindow {
 
                     Item { Layout.fillWidth: true }
 
-                    RoundedButton {
+                    Button {
                         Layout.preferredHeight: root.uiButtonHeight
                         leftPadding: root.uiButtonHPadding
                         rightPadding: root.uiButtonHPadding
@@ -2211,7 +2087,7 @@ ApplicationWindow {
                         enabled: !bridge.isBusy
                         onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false }
                     }
-                    RoundedButton {
+                    Button {
                         Layout.preferredHeight: root.uiButtonHeight
                         leftPadding: root.uiButtonHPadding
                         rightPadding: root.uiButtonHPadding
@@ -2220,7 +2096,7 @@ ApplicationWindow {
                         enabled: !bridge.isBusy
                         onClicked: openProjectDialog.open()
                     }
-                    RoundedButton {
+                    Button {
                         Layout.preferredHeight: root.uiButtonHeight
                         leftPadding: root.uiButtonHPadding
                         rightPadding: root.uiButtonHPadding
@@ -2229,7 +2105,7 @@ ApplicationWindow {
                         enabled: !bridge.isBusy
                         onClicked: root.saveCurrentProjectWithDialogFallback()
                     }
-                    RoundedButton {
+                    Button {
                         Layout.preferredHeight: root.uiButtonHeight
                         leftPadding: root.uiButtonHPadding
                         rightPadding: root.uiButtonHPadding
@@ -2335,7 +2211,7 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            RoundedButton {
+                            Button {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: root.uiButtonHeight
                                 leftPadding: root.uiButtonHPadding
@@ -2400,7 +2276,7 @@ ApplicationWindow {
                                 spacing: 8
                                 Label { text: "视口"; font.pixelSize: 15; font.bold: true; color: "#0F172A" }
                                 Item { Layout.fillWidth: true }
-                                RoundedButton {
+                                Button {
                                     Layout.preferredHeight: root.uiButtonCompactHeight
                                     leftPadding: root.uiButtonHPadding
                                     rightPadding: root.uiButtonHPadding
@@ -2408,7 +2284,7 @@ ApplicationWindow {
                                     text: "适配视图"
                                     onClicked: root.resetViewportTransform()
                                 }
-                                RoundedButton {
+                                Button {
                                     Layout.preferredHeight: root.uiButtonCompactHeight
                                     leftPadding: root.uiButtonHPadding
                                     rightPadding: root.uiButtonHPadding
@@ -2416,7 +2292,7 @@ ApplicationWindow {
                                     text: "放大"
                                     onClicked: root.zoomViewportBy(1.15)
                                 }
-                                RoundedButton {
+                                Button {
                                     Layout.preferredHeight: root.uiButtonCompactHeight
                                     leftPadding: root.uiButtonHPadding
                                     rightPadding: root.uiButtonHPadding
@@ -2631,7 +2507,7 @@ ApplicationWindow {
                                         spacing: 6
                                         Repeater {
                                             model: ["选择", "添加节点", "连接边", "移动节点", "删除"]
-                                            delegate: RoundedButton {
+                                            delegate: Button {
                                                 width: 86
                                                 height: root.uiButtonCompactHeight
                                                 leftPadding: root.uiButtonHPadding
@@ -2641,7 +2517,7 @@ ApplicationWindow {
                                                 onClicked: root.setModelingTool(modelData)
                                             }
                                         }
-                                        RoundedButton {
+                                        Button {
                                             width: 92
                                             height: root.uiButtonCompactHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2650,7 +2526,7 @@ ApplicationWindow {
                                             text: "移动视图"
                                             onClicked: root.setModelingTool("移动视图")
                                         }
-                                        RoundedButton {
+                                        Button {
                                             width: 92
                                             height: root.uiButtonCompactHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2668,7 +2544,7 @@ ApplicationWindow {
 
                                     FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
                                     FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -2680,7 +2556,7 @@ ApplicationWindow {
 
                                     FormField { id: edgeStartField; Layout.fillWidth: true; label: "起点 ID"; text: "p1" }
                                     FormField { id: edgeEndField; Layout.fillWidth: true; label: "终点 ID"; text: "p2" }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -2693,7 +2569,7 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2702,7 +2578,7 @@ ApplicationWindow {
                                             text: "生成闭合面"
                                             onClicked: bridge.buildModelFaces()
                                         }
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2717,17 +2593,17 @@ ApplicationWindow {
 
                                     Label { text: "几何列表"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
                                     Label { text: "点列表"; color: "#334155"; font.pixelSize: 12 }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: bridge.sketchNodeRowsPreview }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: bridge.sketchNodeRowsPreview }
                                     Label { text: "边列表"; color: "#334155"; font.pixelSize: 12 }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: bridge.sketchEdgeRowsPreview }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: bridge.sketchEdgeRowsPreview }
                                     Label { text: "闭合面列表"; color: "#334155"; font.pixelSize: 12 }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: root.faceRowsPreview() }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 72; readOnly: true; text: root.faceRowsPreview() }
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
                                     Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
-                                    RoundedComboBox {
+                                    ComboBox {
                                         id: faceTargetCombo
                                         Layout.fillWidth: true
                                         model: root.faceOptionsFromJson()
@@ -2754,13 +2630,13 @@ ApplicationWindow {
                                             elide: Text.ElideRight
                                         }
                                     }
-                                    RoundedComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
+                                    ComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
                                     FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
 
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             text: "应用到选中闭合面"
                                             onClicked: {
                                                 var faceId = root.parseFaceIdFromOption(faceTargetCombo.currentText)
@@ -2776,7 +2652,7 @@ ApplicationWindow {
                                                 root.repaintViewport()
                                             }
                                         }
-                                        RoundedButton {
+                                        Button {
                                             text: "应用到全部闭合面"
                                             onClicked: bridge.assignMaterialToAllFaces(
                                                 root.parseMaterialIdFromOption(materialAssignCombo.currentText),
@@ -2785,7 +2661,7 @@ ApplicationWindow {
                                         }
                                     }
 
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -2796,7 +2672,7 @@ ApplicationWindow {
                                     }
 
                                     Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
                                 }
                             }
 
@@ -2821,7 +2697,7 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2831,7 +2707,7 @@ ApplicationWindow {
                                             enabled: !bridge.isBusy
                                             onClicked: bridge.generateMeshAsync(Number(meshTargetSizeField.text), Number(meshMinAngleField.text))
                                         }
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2846,7 +2722,7 @@ ApplicationWindow {
                                     Text { text: "节点数：" + bridge.sketchMeshNodeCount; color: "#334155" }
                                     Text { text: "单元数：" + bridge.sketchMeshElementCount; color: "#334155" }
                                     Text { text: "面积误差 / 质量摘要"; color: "#334155" }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 140; readOnly: true; text: bridge.meshQualitySummaryText === "" ? bridge.statusText : bridge.meshQualitySummaryText }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 140; readOnly: true; text: bridge.meshQualitySummaryText === "" ? bridge.statusText : bridge.meshQualitySummaryText }
                                 }
                             }
 
@@ -2872,7 +2748,7 @@ ApplicationWindow {
                                         color: "#334155"
                                     }
 
-                                    RoundedCheckBox {
+                                    CheckBox {
                                         id: gravityEnabledBox
                                         text: "求解时考虑自重"
                                         checked: bridge.gravityEnabled
@@ -2885,15 +2761,15 @@ ApplicationWindow {
                                         wrapMode: Text.WordWrap
                                     }
 
-                                    RoundedCheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }
-                                    RoundedCheckBox { id: uyFixedBox; text: "固定 Uy"; checked: true }
-                                    RoundedButton { text: "添加约束"; onClicked: bridge.addConstraintToSelectedTarget(uxFixedBox.checked, uyFixedBox.checked) }
+                                    CheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }
+                                    CheckBox { id: uyFixedBox; text: "固定 Uy"; checked: true }
+                                    Button { text: "添加约束"; onClicked: bridge.addConstraintToSelectedTarget(uxFixedBox.checked, uyFixedBox.checked) }
 
                                     FormField { id: deleteBcField; Layout.fillWidth: true; label: "删除约束 ID"; text: "bc_1" }
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2902,7 +2778,7 @@ ApplicationWindow {
                                             text: "删除约束"
                                             onClicked: bridge.deleteBoundaryCondition(deleteBcField.text)
                                         }
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2912,7 +2788,7 @@ ApplicationWindow {
                                             onClicked: bridge.clearConstraints()
                                         }
                                     }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.boundaryConditionRowsPreview }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.boundaryConditionRowsPreview }
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
@@ -2924,7 +2800,7 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             text: "整边模式"
                                             onClicked: {
                                                 bridge.useFullEdgeLoadRange()
@@ -2932,7 +2808,7 @@ ApplicationWindow {
                                                 loadEndTField.text = String(bridge.edgeLoadEndT)
                                             }
                                         }
-                                        RoundedButton {
+                                        Button {
                                             text: "应用区间参数"
                                             onClicked: bridge.setSelectedEdgeLoadSegmentRange(
                                                 Number(loadStartTField.text),
@@ -2943,7 +2819,7 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             text: bridge.edgeLoadSegmentSelectionMode ? "取消区间设置" : "设置局部载荷区间"
                                             onClicked: {
                                                 if (bridge.edgeLoadSegmentSelectionMode) {
@@ -2957,11 +2833,11 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             text: "添加集中力"
                                             onClicked: bridge.addLoadToSelectedTarget("nodal_concentrated", Number(loadXField.text), Number(loadYField.text))
                                         }
-                                        RoundedButton {
+                                        Button {
                                             text: bridge.hasEdgeLoadSegment ? "添加局部均布载荷" : "添加均布载荷"
                                             onClicked: bridge.addLoadToSelectedTarget("edge_uniform", Number(loadXField.text), Number(loadYField.text))
                                         }
@@ -2970,7 +2846,7 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2979,7 +2855,7 @@ ApplicationWindow {
                                             text: "删除载荷"
                                             onClicked: bridge.deleteLoad(deleteLoadField.text)
                                         }
-                                        RoundedButton {
+                                        Button {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: root.uiButtonHeight
                                             leftPadding: root.uiButtonHPadding
@@ -2989,7 +2865,7 @@ ApplicationWindow {
                                             onClicked: bridge.clearLoads()
                                         }
                                     }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.loadRowsPreview }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.loadRowsPreview }
                                 }
                             }
 
@@ -3008,7 +2884,7 @@ ApplicationWindow {
                                     spacing: 8
 
                                     Label { text: "求解结果"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -3018,71 +2894,39 @@ ApplicationWindow {
                                         enabled: !bridge.isBusy
                                         onClicked: bridge.solveCurrentModelAsync()
                                     }
-                                    Rectangle {
+                                    Text {
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: 132
-                                        radius: root.uiControlRadius
-                                        color: "#FFFFFF"
-                                        border.color: "#E2E8F0"
-                                        clip: true
-
-                                        Column {
-                                            anchors.fill: parent
-                                            anchors.margins: 9
-                                            spacing: 4
-
-                                            Text {
-                                                width: parent.width
-                                                text: "求解状态：" + bridge.statusText
-                                                color: "#334155"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                width: parent.width
-                                                text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement)
-                                                color: "#334155"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                width: parent.width
-                                                text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises)
-                                                color: "#334155"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                width: parent.width
-                                                text: "Warning 数量：" + bridge.warningCount
-                                                color: "#334155"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                width: parent.width
-                                                text: "云图缓存：" + (bridge.contourCacheValid ? "已生成" : "已失效，请重新求解")
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                width: parent.width
-                                                text: "图片缓存：" + (bridge.contourImageCacheValid ? "已生成" : "已失效，请重新求解")
-                                                color: "#64748B"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
-                                        }
+                                        text: "求解状态：" + bridge.statusText
+                                        color: "#334155"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                    Text { Layout.fillWidth: true; text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155"; elide: Text.ElideRight }
+                                    Text { Layout.fillWidth: true; text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155"; elide: Text.ElideRight }
+                                    Text { Layout.fillWidth: true; text: "Warning 数量：" + bridge.warningCount; color: "#334155"; elide: Text.ElideRight }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "云图缓存：" + (bridge.contourCacheValid ? "已生成" : "已失效，请重新求解")
+                                        color: "#64748B"
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "图片缓存：" + (bridge.contourImageCacheValid ? "已生成" : "已失效，请重新求解")
+                                        color: "#64748B"
+                                        elide: Text.ElideRight
                                     }
 
-                                    Flow {
-                                        id: resultContourButtonFlow
+                                    ColumnLayout {
                                         Layout.fillWidth: true
-                                        spacing: 8
-                                        RoundedButton {
-                                            width: Math.max(150, Math.floor((resultContourButtonFlow.width - 8) / 2))
-                                            height: root.uiButtonHeight
+                                        spacing: 6
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "显示变形示意图"
                                             onClicked: {
                                                 if (!root.ensureContourImageCacheAvailable()) {
@@ -3091,9 +2935,12 @@ ApplicationWindow {
                                                 deformationPlotDialog.open()
                                             }
                                         }
-                                        RoundedButton {
-                                            width: Math.max(150, Math.floor((resultContourButtonFlow.width - 8) / 2))
-                                            height: root.uiButtonHeight
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "显示位移云图"
                                             onClicked: {
                                                 if (!root.ensureContourImageCacheAvailable()) {
@@ -3102,9 +2949,12 @@ ApplicationWindow {
                                                 displacementContourDialog.open()
                                             }
                                         }
-                                        RoundedButton {
-                                            width: Math.max(150, Math.floor((resultContourButtonFlow.width - 8) / 2))
-                                            height: root.uiButtonHeight
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "显示应力云图"
                                             onClicked: {
                                                 if (!root.ensureContourImageCacheAvailable()) {
@@ -3117,9 +2967,7 @@ ApplicationWindow {
 
                                     FormField { id: queryXField; Layout.fillWidth: true; label: "查询 X"; text: String(bridge.resultQueryX) }
                                     FormField { id: queryYField; Layout.fillWidth: true; label: "查询 Y"; text: String(bridge.resultQueryY) }
-                                    RoundedButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: root.uiButtonHeight
+                                    Button {
                                         text: "查询结果"
                                         onClicked: {
                                             root.queryMarkerX = Number(queryXField.text)
@@ -3128,12 +2976,12 @@ ApplicationWindow {
                                             bridge.queryResultAtPoint(Number(queryXField.text), Number(queryYField.text))
                                         }
                                     }
-                                    RoundedTextArea { Layout.fillWidth: true; Layout.preferredHeight: 150; readOnly: true; text: bridge.resultQueryText }
+                                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 150; readOnly: true; text: bridge.resultQueryText }
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "导出"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -3142,7 +2990,7 @@ ApplicationWindow {
                                         text: "导出节点结果"
                                         onClicked: bridge.exportNodeResults("outputs/latest")
                                     }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -3151,7 +2999,7 @@ ApplicationWindow {
                                         text: "导出单元结果"
                                         onClicked: bridge.exportElementResults("outputs/latest")
                                     }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -3160,7 +3008,7 @@ ApplicationWindow {
                                         text: "导出位移云图数据"
                                         onClicked: bridge.exportDisplacementContourData("outputs/latest")
                                     }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
@@ -3169,7 +3017,7 @@ ApplicationWindow {
                                         text: "导出应力云图数据"
                                         onClicked: bridge.exportStressContourData("outputs/latest")
                                     }
-                                    RoundedButton {
+                                    Button {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
