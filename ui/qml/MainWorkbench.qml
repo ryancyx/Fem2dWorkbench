@@ -3038,16 +3038,137 @@ ApplicationWindow {
     Rectangle {
         id: busyOverlay
         anchors.fill: parent
-        visible: bridge.isBusy
+        visible: bridge.isBusy || busyOverlay.visualFinishActive
         color: "#66000000"
         z: 9999
+
         property real flowOffset: -0.4
         property real busyVisualProgress: 0
+        property real busyTargetProgress: 0
         property double busyStartMs: 0
-        property bool busyWasActive: false
+        property bool backendBusyWasActive: false
+        property bool visualFinishActive: false
+        property string displayTitle: bridge.busyTitle
+        property string displayMessage: bridge.busyMessage
+        property string displayStage: bridge.busyStage
+        property string displayMode: bridge.busyProgressMode
+
+        function clampProgress(value) {
+            var numberValue = Number(value)
+            if (!isFinite(numberValue)) {
+                return 0
+            }
+            return Math.max(0, Math.min(100, numberValue))
+        }
+
+        function refreshDisplayTextFromBridge() {
+            busyOverlay.displayTitle = bridge.busyTitle
+            busyOverlay.displayMessage = root.busyOverlayMessage()
+            busyOverlay.displayStage = bridge.busyStage
+            busyOverlay.displayMode = bridge.busyProgressMode
+        }
+
+        function currentFakeTarget() {
+            var elapsed = Date.now() - busyOverlay.busyStartMs
+            return root.fakeProgressAt(
+                elapsed,
+                bridge.busyEstimatedMs,
+                bridge.busyHoldProgress
+            )
+        }
+
+        function currentTargetProgress() {
+            if (busyOverlay.visualFinishActive) {
+                return 100
+            }
+
+            var realTarget = busyOverlay.clampProgress(bridge.busyProgress)
+            var mode = bridge.busyProgressMode
+
+            if (mode === "fake_determinate") {
+                return busyOverlay.clampProgress(Math.max(realTarget, busyOverlay.currentFakeTarget()))
+            }
+
+            if (mode === "determinate") {
+                return realTarget
+            }
+
+            return busyOverlay.busyVisualProgress
+        }
+
+        function updateBusyVisualProgress() {
+            if (bridge.isBusy) {
+                busyOverlay.refreshDisplayTextFromBridge()
+            }
+
+            var target = busyOverlay.currentTargetProgress()
+
+            // 视觉进度只前进，不因为真实阶段回退或状态刷新而倒退。
+            if (target < busyOverlay.busyVisualProgress) {
+                target = busyOverlay.busyVisualProgress
+            }
+
+            busyOverlay.busyTargetProgress = target
+
+            var diff = target - busyOverlay.busyVisualProgress
+            if (diff > 0.01) {
+                // 平滑追赶：差距越大追得略快，但限制单帧最大跳变，避免 2% -> 97% 瞬跳。
+                var baseStep = busyOverlay.visualFinishActive ? 0.65 : 0.22
+                var dynamicStep = Math.max(baseStep, diff * 0.028)
+                var maxStep = busyOverlay.visualFinishActive ? 1.15 : 0.85
+                var step = Math.min(dynamicStep, maxStep)
+                busyOverlay.busyVisualProgress = Math.min(busyOverlay.busyVisualProgress + step, target)
+            }
+
+            if (busyOverlay.visualFinishActive && busyOverlay.busyVisualProgress >= 99.8) {
+                busyOverlay.busyVisualProgress = 100
+                if (!busyFinishCloseTimer.running) {
+                    busyFinishCloseTimer.start()
+                }
+            }
+        }
+
+        function startVisualBusy() {
+            busyFinishCloseTimer.stop()
+            busyOverlay.visualFinishActive = false
+            busyOverlay.backendBusyWasActive = true
+            busyOverlay.busyStartMs = Date.now()
+            busyOverlay.busyVisualProgress = 0
+            busyOverlay.busyTargetProgress = 0
+            busyOverlay.refreshDisplayTextFromBridge()
+        }
+
+        function startVisualFinish() {
+            // 后端任务已经完成，但前端遮罩先保留，让视觉进度平滑走到 100% 后再关闭。
+            if (!busyOverlay.backendBusyWasActive) {
+                return
+            }
+
+            busyOverlay.backendBusyWasActive = false
+            busyOverlay.visualFinishActive = true
+            busyOverlay.displayMode = "fake_determinate"
+            busyOverlay.displayMessage = busyOverlay.displayMessage === "" ? "完成" : "完成"
+            busyOverlay.displayStage = "完成"
+            busyOverlay.busyTargetProgress = 100
+
+            if (busyOverlay.busyVisualProgress < 1) {
+                busyOverlay.busyVisualProgress = 1
+            }
+        }
+
+        function clearVisualBusy() {
+            busyOverlay.visualFinishActive = false
+            busyOverlay.backendBusyWasActive = false
+            busyOverlay.busyVisualProgress = 0
+            busyOverlay.busyTargetProgress = 0
+            busyOverlay.displayTitle = ""
+            busyOverlay.displayMessage = ""
+            busyOverlay.displayStage = ""
+            busyOverlay.displayMode = "determinate"
+        }
 
         NumberAnimation on flowOffset {
-            running: busyOverlay.visible && bridge.busyProgressMode === "indeterminate"
+            running: busyOverlay.visible && busyOverlay.displayMode === "indeterminate"
             loops: Animation.Infinite
             from: -0.4
             to: 1.2
@@ -3058,16 +3179,15 @@ ApplicationWindow {
             id: fakeProgressTimer
             interval: 16
             repeat: true
-            running: bridge.isBusy && bridge.busyProgressMode === "fake_determinate"
-            onTriggered: {
-                var now = Date.now()
-                var elapsed = now - busyOverlay.busyStartMs
-                busyOverlay.busyVisualProgress = root.fakeProgressAt(
-                    elapsed,
-                    bridge.busyEstimatedMs,
-                    bridge.busyHoldProgress
-                )
-            }
+            running: busyOverlay.visible && busyOverlay.displayMode !== "indeterminate"
+            onTriggered: busyOverlay.updateBusyVisualProgress()
+        }
+
+        Timer {
+            id: busyFinishCloseTimer
+            interval: 320
+            repeat: false
+            onTriggered: busyOverlay.clearVisualBusy()
         }
 
         Connections {
@@ -3075,16 +3195,13 @@ ApplicationWindow {
 
             function onBusyStateChanged() {
                 if (bridge.isBusy) {
-                    if (!busyOverlay.busyWasActive && bridge.busyProgressMode === "fake_determinate") {
-                        busyOverlay.busyStartMs = Date.now()
-                        busyOverlay.busyVisualProgress = 0
-                    } else if (bridge.busyProgressMode === "determinate") {
-                        busyOverlay.busyVisualProgress = bridge.busyProgress
+                    if (!busyOverlay.backendBusyWasActive || busyOverlay.visualFinishActive) {
+                        busyOverlay.startVisualBusy()
+                    } else {
+                        busyOverlay.refreshDisplayTextFromBridge()
                     }
-                    busyOverlay.busyWasActive = true
                 } else {
-                    busyOverlay.busyVisualProgress = 0
-                    busyOverlay.busyWasActive = false
+                    busyOverlay.startVisualFinish()
                 }
             }
         }
@@ -3108,7 +3225,7 @@ ApplicationWindow {
                 spacing: 12
 
                 Label {
-                    text: bridge.busyTitle
+                    text: busyOverlay.displayTitle
                     font.bold: true
                     font.pixelSize: 16
                     color: "#0F172A"
@@ -3116,7 +3233,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.fillWidth: true
-                    text: root.busyOverlayMessage()
+                    text: busyOverlay.displayMessage
                     wrapMode: Text.WordWrap
                     color: "#475569"
                 }
@@ -3125,22 +3242,14 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     from: 0
                     to: 100
-                    value: bridge.busyProgress
-                    visible: bridge.busyProgressMode === "determinate"
-                }
-
-                ProgressBar {
-                    Layout.fillWidth: true
-                    from: 0
-                    to: 100
                     value: busyOverlay.busyVisualProgress
-                    visible: bridge.busyProgressMode === "fake_determinate"
+                    visible: busyOverlay.displayMode !== "indeterminate"
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 12
-                    visible: bridge.busyProgressMode === "indeterminate"
+                    visible: busyOverlay.displayMode === "indeterminate"
                     radius: 6
                     color: "#E2E8F0"
                     clip: true
@@ -3161,17 +3270,15 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
-                        text: bridge.busyStage
+                        text: busyOverlay.displayStage
                         color: "#64748B"
                         font.pixelSize: 12
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: bridge.busyProgressMode === "indeterminate"
+                        text: busyOverlay.displayMode === "indeterminate"
                               ? "处理中..."
-                              : ((bridge.busyProgressMode === "fake_determinate"
-                                  ? Math.round(busyOverlay.busyVisualProgress)
-                                  : bridge.busyProgress) + "%")
+                              : (Math.round(busyOverlay.busyVisualProgress) + "%")
                         color: "#0F172A"
                         font.pixelSize: 12
                     }
