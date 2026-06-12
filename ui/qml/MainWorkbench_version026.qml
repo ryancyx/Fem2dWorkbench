@@ -467,25 +467,6 @@ ApplicationWindow {
         }
     }
 
-    function modelPointOptionsFromJson() {
-        var rows = root.modelPoints()
-        var options = []
-        for (var i = 0; i < rows.length; i++) {
-            var x = Number(rows[i].x)
-            var y = Number(rows[i].y)
-            options.push(String(rows[i].id) + " | x=" + x.toFixed(4) + " y=" + y.toFixed(4))
-        }
-        return options
-    }
-
-    function parsePointIdFromOption(optionText) {
-        var raw = String(optionText || "")
-        if (raw === "") {
-            return ""
-        }
-        return raw.split("|")[0].trim()
-    }
-
     function modelEdges() {
         try {
             return JSON.parse(bridge.modelEdgesJson)
@@ -844,17 +825,6 @@ ApplicationWindow {
 
     function zoomViewportBy(factor) {
         root.viewportScale = root.clampViewportScale(root.viewportScale * factor)
-        root.repaintViewport()
-    }
-
-    function zoomViewportAt(factor, mouseX, mouseY) {
-        root.updateViewportGeometryFrame()
-        var before = root.screenToModel(mouseX, mouseY)
-        root.viewportScale = root.clampViewportScale(root.viewportScale * factor)
-        root.updateViewportGeometryFrame()
-        var after = root.screenPoint(before)
-        root.viewportOffsetX += mouseX - after.x
-        root.viewportOffsetY += mouseY - after.y
         root.repaintViewport()
     }
 
@@ -2859,28 +2829,6 @@ ApplicationWindow {
                                     text: "缩小"
                                     onClicked: root.zoomViewportBy(1.0 / 1.15)
                                 }
-                                WorkbenchButton {
-                                    Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
-                                    text: "移动视图"
-                                    visualRole: root.viewportPanMode ? "strongPrimary" : "neutral"
-                                    onClicked: root.setModelingTool("移动视图")
-                                }
-                                WorkbenchButton {
-                                    Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
-                                    text: "视图复位"
-                                    onClicked: {
-                                        root.viewportPanMode = false
-                                        root.isPanningViewport = false
-                                        root.isPanning = false
-                                        root.resetViewportTransform()
-                                    }
-                                }
                             }
                         }
 
@@ -2911,14 +2859,6 @@ ApplicationWindow {
                                 cursorShape: root.viewportPanMode
                                              ? (root.isPanningViewport ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
                                              : Qt.ArrowCursor
-
-                                onWheel: function(wheel) {
-                                    if (root.viewportPanMode && (wheel.modifiers & Qt.ControlModifier)) {
-                                        var factor = wheel.angleDelta.y > 0 ? 1.10 : (1.0 / 1.10)
-                                        root.zoomViewportAt(factor, wheel.x, wheel.y)
-                                        wheel.accepted = true
-                                    }
-                                }
 
                                 onPressed: function(mouse) {
                                     root.lastMouseX = mouse.x
@@ -3073,7 +3013,7 @@ ApplicationWindow {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.margins: 14
-                            spacing: 14
+                            spacing: 12
 
                             Rectangle {
                                 visible: root.currentMode === "建模与材料"
@@ -3086,59 +3026,55 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: modelingColumn
                                     anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 12
+                                    anchors.margins: 10
+                                    spacing: 8
 
                                     Label { text: "建模工具"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
 
-                                    ColumnLayout {
+                                    Flow {
                                         Layout.fillWidth: true
-                                        spacing: 10
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 6
-                                            Repeater {
-                                                model: ["选择", "删除"]
-                                                delegate: WorkbenchButton {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: root.uiButtonCompactHeight
-                                                    leftPadding: root.uiButtonHPadding
-                                                    rightPadding: root.uiButtonHPadding
-                                                    font.pixelSize: 12
-                                                    text: modelData
-                                                    onClicked: root.setModelingTool(modelData)
-                                                }
+                                        spacing: 6
+                                        Repeater {
+                                            model: ["选择", "添加节点", "连接边", "移动节点", "删除"]
+                                            delegate: WorkbenchButton {
+                                                width: 86
+                                                height: root.uiButtonCompactHeight
+                                                leftPadding: root.uiButtonHPadding
+                                                rightPadding: root.uiButtonHPadding
+                                                font.pixelSize: 12
+                                                text: modelData
+                                                onClicked: root.setModelingTool(modelData)
                                             }
                                         }
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 6
-                                            Repeater {
-                                                model: ["添加节点", "移动节点", "连接边"]
-                                                delegate: WorkbenchButton {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: root.uiButtonCompactHeight
-                                                    leftPadding: root.uiButtonHPadding
-                                                    rightPadding: root.uiButtonHPadding
-                                                    font.pixelSize: 12
-                                                    text: modelData
-                                                    onClicked: root.setModelingTool(modelData)
-                                                }
+                                        WorkbenchButton {
+                                            width: 92
+                                            height: root.uiButtonCompactHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "移动视图"
+                                            onClicked: root.setModelingTool("移动视图")
+                                        }
+                                        WorkbenchButton {
+                                            width: 92
+                                            height: root.uiButtonCompactHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "视图复位"
+                                            onClicked: {
+                                                root.viewportPanMode = false
+                                                root.isPanningViewport = false
+                                                root.isPanning = false
+                                                root.resetViewportTransform()
                                             }
                                         }
                                     }
 
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-                                        FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
-                                        FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
-                                    }
+                                    FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
+                                    FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
                                     WorkbenchButton {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
                                         rightPadding: root.uiButtonHPadding
@@ -3147,60 +3083,20 @@ ApplicationWindow {
                                         onClicked: bridge.addModelPoint(Number(pointXField.text), Number(pointYField.text))
                                     }
 
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 4
-                                            Label { text: "起点 ID"; color: "#334155"; font.pixelSize: 11 }
-                                            WorkbenchComboBox {
-                                                id: edgeStartCombo
-                                                Layout.fillWidth: true
-                                                model: root.modelPointOptionsFromJson()
-                                                currentIndex: count > 0 ? 0 : -1
-                                                displayText: count > 0 ? currentText : "暂无节点"
-                                            }
-                                        }
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 4
-                                            Label { text: "终点 ID"; color: "#334155"; font.pixelSize: 11 }
-                                            WorkbenchComboBox {
-                                                id: edgeEndCombo
-                                                Layout.fillWidth: true
-                                                model: root.modelPointOptionsFromJson()
-                                                currentIndex: count > 1 ? 1 : (count > 0 ? 0 : -1)
-                                                displayText: count > 0 ? currentText : "暂无节点"
-                                            }
-                                        }
-                                    }
+                                    FormField { id: edgeStartField; Layout.fillWidth: true; label: "起点 ID"; text: "p1" }
+                                    FormField { id: edgeEndField; Layout.fillWidth: true; label: "终点 ID"; text: "p2" }
                                     WorkbenchButton {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
                                         rightPadding: root.uiButtonHPadding
                                         font.pixelSize: 12
                                         text: "连接边"
-                                        onClicked: {
-                                            var startId = root.parsePointIdFromOption(edgeStartCombo.currentText)
-                                            var endId = root.parsePointIdFromOption(edgeEndCombo.currentText)
-                                            if (startId === "" || endId === "") {
-                                                viewportHint = "请先创建至少两个节点，并在下拉框中选择起点和终点。"
-                                                return
-                                            }
-                                            if (startId === endId) {
-                                                viewportHint = "起点和终点不能相同。"
-                                                return
-                                            }
-                                            bridge.connectModelEdge(startId, endId)
-                                        }
+                                        onClicked: bridge.connectModelEdge(edgeStartField.text, edgeEndField.text)
                                     }
 
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         spacing: 8
                                         WorkbenchButton {
                                             Layout.fillWidth: true
@@ -3234,100 +3130,78 @@ ApplicationWindow {
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
-                                    Rectangle {
+                                    Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                    Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
+                                    WorkbenchComboBox {
+                                        id: faceTargetCombo
                                         Layout.fillWidth: true
-                                        implicitHeight: materialAssignColumn.implicitHeight + 26
-                                        radius: root.uiCardRadius
-                                        color: "#F9FBFF"
-                                        border.color: root.uiPrimaryBorder
-                                        border.width: 1.0
-                                        clip: true
-
-                                        ColumnLayout {
-                                            id: materialAssignColumn
-                                            anchors.fill: parent
-                                            anchors.margins: 13
-                                            spacing: 11
-
-                                            Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                            Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
-                                            WorkbenchComboBox {
-                                                id: faceTargetCombo
-                                                Layout.fillWidth: true
-                                                model: root.faceOptionsFromJson()
-                                                currentIndex: root.faceOptionIndexById(bridge.selectedFaceId)
-                                                displayText: count > 0 ? currentText : "请先生成闭合面"
-                                                onActivated: function(index) {
-                                                    var faceId = root.parseFaceIdFromOption(faceTargetCombo.textAt(index))
-                                                    if (faceId !== "") {
-                                                        bridge.selectGeometryFace(faceId)
-                                                        root.repaintViewport()
-                                                    }
-                                                }
+                                        model: root.faceOptionsFromJson()
+                                        currentIndex: root.faceOptionIndexById(bridge.selectedFaceId)
+                                        displayText: count > 0 ? currentText : "请先生成闭合面"
+                                        onActivated: function(index) {
+                                            var faceId = root.parseFaceIdFromOption(faceTargetCombo.textAt(index))
+                                            if (faceId !== "") {
+                                                bridge.selectGeometryFace(faceId)
+                                                root.repaintViewport()
                                             }
-                                            Label { text: "选中材料"; color: "#334155"; font.pixelSize: 12 }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-                                                WorkbenchComboBox {
-                                                    id: materialAssignCombo
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredWidth: 1
-                                                    model: bridge.materialOptions
-                                                }
-                                                WorkbenchButton {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredWidth: 1
-                                                    Layout.preferredHeight: root.uiButtonHeight
-                                                    leftPadding: root.uiButtonHPadding
-                                                    rightPadding: root.uiButtonHPadding
-                                                    font.pixelSize: 12
-                                                    text: "打开材料编辑器"
-                                                    onClicked: materialEditorDialog.open()
-                                                }
-                                            }
-                                            FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                Layout.topMargin: 3
-                                                spacing: 8
-                                                WorkbenchButton {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: 42
-                                                    visualRole: "strongPrimary"
-                                                    text: "应用到选中闭合面"
-                                                    onClicked: {
-                                                        var faceId = root.parseFaceIdFromOption(faceTargetCombo.currentText)
-                                                        if (faceId === "") {
-                                                            viewportHint = "请先生成并选择闭合面。"
-                                                            return
-                                                        }
-                                                        bridge.selectGeometryFace(faceId)
-                                                        bridge.assignMaterialToSelectedFace(
-                                                            root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                            Number(thicknessAssignField.text)
-                                                        )
-                                                        root.repaintViewport()
-                                                    }
-                                                }
-                                                WorkbenchButton {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: 42
-                                                    visualRole: "strongPrimary"
-                                                    text: "应用到全部闭合面"
-                                                    onClicked: bridge.assignMaterialToAllFaces(
-                                                        root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                        Number(thicknessAssignField.text)
-                                                    )
-                                                }
-                                            }
-
-                                            Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
-                                            WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
                                         }
                                     }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Label { text: "当前闭合面"; color: "#334155"; font.pixelSize: 12 }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: root.currentFaceDisplayText()
+                                            color: "#0F172A"
+                                            font.pixelSize: 12
+                                            horizontalAlignment: Text.AlignRight
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                    WorkbenchComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
+                                    FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        WorkbenchButton {
+                                            text: "应用到选中闭合面"
+                                            onClicked: {
+                                                var faceId = root.parseFaceIdFromOption(faceTargetCombo.currentText)
+                                                if (faceId === "") {
+                                                    viewportHint = "请先生成并选择闭合面。"
+                                                    return
+                                                }
+                                                bridge.selectGeometryFace(faceId)
+                                                bridge.assignMaterialToSelectedFace(
+                                                    root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                    Number(thicknessAssignField.text)
+                                                )
+                                                root.repaintViewport()
+                                            }
+                                        }
+                                        WorkbenchButton {
+                                            text: "应用到全部闭合面"
+                                            onClicked: bridge.assignMaterialToAllFaces(
+                                                root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                Number(thicknessAssignField.text)
+                                            )
+                                        }
+                                    }
+
+                                    WorkbenchButton {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "打开材料编辑器"
+                                        onClicked: materialEditorDialog.open()
+                                    }
+
+                                    Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
+                                    WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
                                 }
                             }
 
@@ -3342,16 +3216,15 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: meshColumn
                                     anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 12
+                                    anchors.margins: 10
+                                    spacing: 8
 
                                     Label { text: "网格生成"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
                                     Label { text: "唯一正式网格器：Gmsh CST 三角网格"; color: "#334155"; wrapMode: Text.WordWrap }
-                                    FormField { id: meshTargetSizeField; Layout.fillWidth: true; label: "target_size"; text: String(bridge.meshTargetSize > 0 ? bridge.meshTargetSize : 0.8) }
+                                    FormField { id: meshTargetSizeField; Layout.fillWidth: true; label: "target_size"; text: String(bridge.meshTargetSize) }
                                     FormField { id: meshMinAngleField; Layout.fillWidth: true; label: "min_angle"; text: String(bridge.meshMinAngle) }
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         spacing: 8
                                         WorkbenchButton {
                                             Layout.fillWidth: true

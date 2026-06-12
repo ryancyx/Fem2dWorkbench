@@ -23,8 +23,6 @@ PALETTE_NAME = "jet"
 
 STRESS_DISPLAY_SCALE = 1.0e-3
 STRESS_DISPLAY_UNIT = "kPa"
-DISPLACEMENT_BASE_UNIT = "m"
-
 
 _SUPERSCRIPT_DIGITS = str.maketrans({
     "-": "⁻",
@@ -92,94 +90,6 @@ def _format_min_max_text(min_value: float, max_value: float, unit_label: str) ->
 def _is_stress_unit(unit_label: str) -> bool:
     return unit_label.strip().lower() in {"kpa", "kilopascal", "kilopascals"}
 
-
-def _resolve_displacement_unit(max_abs_m: float) -> tuple[float, str]:
-    """Choose a readable display unit for displacement values stored in meters.
-
-    The solver and JSON still use SI base units. This only affects PNG labels and
-    colorbar values. Kilometres are technically supported for extremely large
-    values, but engineering displacement is usually shown as m / mm / μm / nm.
-    """
-    try:
-        max_abs = abs(float(max_abs_m))
-    except (TypeError, ValueError):
-        max_abs = 0.0
-    if not np.isfinite(max_abs) or max_abs <= 0.0:
-        return 1.0, "m"
-    if max_abs >= 1000.0:
-        return 1.0e-3, "km"
-    if max_abs >= 1.0:
-        return 1.0, "m"
-    if max_abs >= 1.0e-3:
-        return 1.0e3, "mm"
-    if max_abs >= 1.0e-6:
-        return 1.0e6, "μm"
-    if max_abs >= 1.0e-9:
-        return 1.0e9, "nm"
-    return 1.0, "m"
-
-
-def _display_profile(prefix: str, unit_label: str, raw_values: list[float]) -> tuple[float, str]:
-    if _is_stress_unit(unit_label):
-        return STRESS_DISPLAY_SCALE, STRESS_DISPLAY_UNIT
-    if prefix == "displacement":
-        finite_values = [abs(float(value)) for value in raw_values if np.isfinite(float(value))]
-        max_abs = max(finite_values) if finite_values else 0.0
-        return _resolve_displacement_unit(max_abs)
-    return 1.0, unit_label
-
-
-def _robust_color_limits(values: list[float]) -> tuple[float, float, str]:
-    """Return color limits that keep local variation visible despite outliers.
-
-    For non-negative FEM fields such as displacement magnitude and Von Mises
-    stress, the lower bound stays at the actual minimum and only the upper tail is
-    clipped softly. This makes the broad field variation visible while still
-    marking concentrated peaks through the colorbar extension.
-    """
-    arr = np.asarray([float(value) for value in values], dtype=float)
-    arr = arr[np.isfinite(arr)]
-    if arr.size == 0:
-        return 0.0, 1.0, "neither"
-
-    actual_min = float(np.min(arr))
-    actual_max = float(np.max(arr))
-    if abs(actual_max - actual_min) <= 1.0e-15:
-        pad = max(abs(actual_max) * 0.05, 1.0e-12)
-        return actual_min - pad, actual_max + pad, "neither"
-
-    if arr.size < 8:
-        return actual_min, actual_max, "neither"
-
-    if actual_min >= 0.0:
-        q_high = float(np.percentile(arr, 95.0))
-        if q_high > actual_min and q_high < actual_max * 0.995:
-            return actual_min, q_high, "max"
-        return actual_min, actual_max, "neither"
-
-    q_low = float(np.percentile(arr, 2.0))
-    q_high = float(np.percentile(arr, 98.0))
-    if q_high > q_low and (q_low > actual_min or q_high < actual_max):
-        extend = "both"
-        if q_low <= actual_min:
-            extend = "max"
-        elif q_high >= actual_max:
-            extend = "min"
-        return q_low, q_high, extend
-    return actual_min, actual_max, "neither"
-
-
-def _figure_note(fig, text: str) -> None:
-    fig.text(
-        0.09,
-        0.035,
-        text,
-        fontsize=10,
-        color="#334155",
-        va="bottom",
-        ha="left",
-        bbox={"boxstyle": "round,pad=0.35", "facecolor": "#F8FAFC", "edgecolor": "#CBD5E1", "alpha": 0.92},
-    )
 
 
 
@@ -250,7 +160,7 @@ def generate_contour_images(
                     mode="smooth",
                     title="Displacement Contour",
                     legend_label="|u|",
-                    unit_label=DISPLACEMENT_BASE_UNIT,
+                    unit_label="",
                 )
             )
             image_map["stress_exact"][key] = str(
@@ -290,26 +200,26 @@ def _render_deformation(cache_dir: Path, data: dict[str, Any], show_mesh: bool, 
     x, y, triangles, _, _, _ = _mesh_arrays(node_rows, elements, show_deformed=False)
     dx, dy, _, _, _, _ = _mesh_arrays(node_rows, elements, show_deformed=show_deformed, factor=factor)
 
-    max_displacement_m = float((data.get("summary") or {}).get("max_displacement", 0.0) or 0.0)
-    displacement_scale, displacement_unit = _resolve_displacement_unit(max_displacement_m)
-
     fig, ax = _new_figure()
     try:
-        triangulation_original = mtri.Triangulation(x, y, triangles)
-        triangulation_deformed = mtri.Triangulation(dx, dy, triangles)
         if show_mesh:
-            ax.triplot(triangulation_original, color="#94A3B8", linewidth=0.8)
+            ax.triplot(mtri.Triangulation(x, y, triangles), color="#94A3B8", linewidth=0.8)
         if show_deformed:
-            ax.triplot(triangulation_deformed, color="#7C3AED", linewidth=1.2)
+            ax.triplot(mtri.Triangulation(dx, dy, triangles), color="#7C3AED", linewidth=1.2)
         else:
-            ax.triplot(triangulation_original, color="#475569", linewidth=1.1)
+            ax.triplot(mtri.Triangulation(x, y, triangles), color="#475569", linewidth=1.1)
         ax.set_title("Deformation Preview", fontsize=14)
-        _finish_axes(ax)
-        _figure_note(
-            fig,
-            f"Max |u| = {_format_number(max_displacement_m * displacement_scale)} {displacement_unit}    "
+        ax.text(
+            0.02,
+            0.02,
+            f"Max |u| = {_format_number(float((data.get('summary') or {}).get('max_displacement', 0.0) or 0.0))}\n"
             f"Scale factor = {_format_number(factor, decimals=3)}",
+            transform=ax.transAxes,
+            fontsize=10,
+            color="#334155",
+            verticalalignment="bottom",
         )
+        _finish_axes(ax)
         file_path = cache_dir / f"deformation_preview_{_variant_key(show_mesh, show_deformed)}.png"
         fig.savefig(file_path, dpi=100, bbox_inches="tight", facecolor="#F8FAFC")
         return file_path
@@ -332,21 +242,16 @@ def _render_scalar_contour(
     node_rows = data.get("nodes", [])
     elements = data.get("elements", [])
     factor = float(data.get("default_scale_factor", 1.0) or 1.0)
-    x, y, triangles, _, raw_values, raw_element_values = _mesh_arrays(
+    x, y, triangles, _, values, element_values = _mesh_arrays(
         node_rows,
         elements,
         show_deformed=show_deformed,
         factor=factor,
         mode=mode,
     )
-
-    raw_field_values = list(raw_element_values if mode == "exact" else raw_values)
-    display_scale, display_unit = _display_profile(prefix, unit_label, raw_field_values)
-    values = [float(value) * display_scale for value in raw_values]
-    element_values = [float(value) * display_scale for value in raw_element_values]
-    field_values = list(element_values if mode == "exact" else values)
-    color_min, color_max, colorbar_extend = _robust_color_limits(field_values)
-
+    display_scale = STRESS_DISPLAY_SCALE if _is_stress_unit(unit_label) else 1.0
+    values = [float(value) * display_scale for value in values]
+    element_values = [float(value) * display_scale for value in element_values]
     triangulation = mtri.Triangulation(x, y, triangles)
     fig, ax = _new_figure()
     try:
@@ -356,8 +261,6 @@ def _render_scalar_contour(
                 facecolors=np.asarray(element_values, dtype=float),
                 cmap=PALETTE_NAME,
                 shading="flat",
-                vmin=color_min,
-                vmax=color_max,
             )
         else:
             mappable = ax.tripcolor(
@@ -365,37 +268,26 @@ def _render_scalar_contour(
                 np.asarray(values, dtype=float),
                 cmap=PALETTE_NAME,
                 shading="gouraud",
-                vmin=color_min,
-                vmax=color_max,
             )
         if show_mesh:
             ax.triplot(triangulation, color=(0.1, 0.15, 0.2, 0.28), linewidth=0.6)
-        colorbar = fig.colorbar(
-            mappable,
-            ax=ax,
-            fraction=0.046,
-            pad=0.04,
-            extend=colorbar_extend,
-        )
-        colorbar.set_label(f"{legend_label} ({display_unit})".strip() if display_unit else legend_label)
+        colorbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04)
+        colorbar.set_label(f"{legend_label} ({unit_label})".strip() if unit_label else legend_label)
         colorbar.ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _pos: _format_number(value)))
         colorbar.update_ticks()
-
-        min_key = "min_displacement" if prefix == "displacement" else "min_von_mises"
-        max_key = "max_displacement" if prefix == "displacement" else "max_von_mises"
-        actual_min = float(data.get(min_key, 0.0) or 0.0) * display_scale
-        actual_max = float(data.get(max_key, 0.0) or 0.0) * display_scale
-        ax.set_title(title if not display_unit else f"{title} ({display_unit})", fontsize=14)
-        _finish_axes(ax)
-        scale_note = ""
-        if colorbar_extend != "neither":
-            scale_note = f"    Color scale max = {_format_number(color_max)} {display_unit}"
-        _figure_note(
-            fig,
-            f"Min = {_format_number(actual_min)} {display_unit}    "
-            f"Max = {_format_number(actual_max)} {display_unit}    "
-            f"Deformed view = {'On' if show_deformed else 'Off'}{scale_note}",
+        min_value = float(data.get("min_displacement", data.get("min_von_mises", 0.0)) or 0.0) * display_scale
+        max_value = float(data.get("max_displacement", data.get("max_von_mises", 0.0)) or 0.0) * display_scale
+        ax.set_title(title if not unit_label else f"{title} ({unit_label})", fontsize=14)
+        ax.text(
+            0.02,
+            0.02,
+            f"{_format_min_max_text(min_value, max_value, unit_label)}\nDeformed view = {'On' if show_deformed else 'Off'}",
+            transform=ax.transAxes,
+            fontsize=10,
+            color="#334155",
+            verticalalignment="bottom",
         )
+        _finish_axes(ax)
         file_path = cache_dir / f"{prefix}_{_variant_key(show_mesh, show_deformed)}.png"
         fig.savefig(file_path, dpi=100, bbox_inches="tight", facecolor="#F8FAFC")
         return file_path
@@ -449,7 +341,6 @@ def _new_figure():
     fig, ax = plt.subplots(figsize=(IMAGE_WIDTH / 100.0, IMAGE_HEIGHT / 100.0), dpi=100)
     fig.patch.set_facecolor("#F8FAFC")
     ax.set_facecolor("#F8FAFC")
-    fig.subplots_adjust(left=0.08, right=0.86, bottom=0.14, top=0.90)
     return fig, ax
 
 

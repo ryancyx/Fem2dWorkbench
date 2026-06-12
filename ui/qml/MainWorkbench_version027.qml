@@ -3073,7 +3073,7 @@ ApplicationWindow {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.margins: 14
-                            spacing: 14
+                            spacing: 12
 
                             Rectangle {
                                 visible: root.currentMode === "建模与材料"
@@ -3086,14 +3086,14 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: modelingColumn
                                     anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 12
+                                    anchors.margins: 10
+                                    spacing: 8
 
                                     Label { text: "建模工具"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
-                                        spacing: 10
+                                        spacing: 6
 
                                         RowLayout {
                                             Layout.fillWidth: true
@@ -3138,7 +3138,6 @@ ApplicationWindow {
                                     }
                                     WorkbenchButton {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
                                         rightPadding: root.uiButtonHPadding
@@ -3177,7 +3176,6 @@ ApplicationWindow {
                                     }
                                     WorkbenchButton {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
                                         rightPadding: root.uiButtonHPadding
@@ -3200,7 +3198,6 @@ ApplicationWindow {
 
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         spacing: 8
                                         WorkbenchButton {
                                             Layout.fillWidth: true
@@ -3236,7 +3233,7 @@ ApplicationWindow {
 
                                     Rectangle {
                                         Layout.fillWidth: true
-                                        implicitHeight: materialAssignColumn.implicitHeight + 26
+                                        implicitHeight: materialAssignColumn.implicitHeight + 22
                                         radius: root.uiCardRadius
                                         color: "#F9FBFF"
                                         border.color: root.uiPrimaryBorder
@@ -3246,8 +3243,8 @@ ApplicationWindow {
                                         ColumnLayout {
                                             id: materialAssignColumn
                                             anchors.fill: parent
-                                            anchors.margins: 13
-                                            spacing: 11
+                                            anchors.margins: 11
+                                            spacing: 8
 
                                             Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
                                             Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
@@ -3291,7 +3288,6 @@ ApplicationWindow {
 
                                             RowLayout {
                                                 Layout.fillWidth: true
-                                                Layout.topMargin: 3
                                                 spacing: 8
                                                 WorkbenchButton {
                                                     Layout.fillWidth: true
@@ -3342,8 +3338,8 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: meshColumn
                                     anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 12
+                                    anchors.margins: 10
+                                    spacing: 8
 
                                     Label { text: "网格生成"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
                                     Label { text: "唯一正式网格器：Gmsh CST 三角网格"; color: "#334155"; wrapMode: Text.WordWrap }
@@ -3351,7 +3347,6 @@ ApplicationWindow {
                                     FormField { id: meshMinAngleField; Layout.fillWidth: true; label: "min_angle"; text: String(bridge.meshMinAngle) }
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Layout.topMargin: 2
                                         spacing: 8
                                         WorkbenchButton {
                                             Layout.fillWidth: true

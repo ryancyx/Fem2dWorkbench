@@ -17,13 +17,14 @@ ApplicationWindow {
 
     property string currentMode: "建模与材料"
     // 视图缩放说明：viewportScaleDisplayBase 对应界面显示的 100%。
-    // 这里把上一版“1%”的实际大小重新标定为 100%，
-    // 默认视图再缩小 10 倍，因此默认显示为 10%。
-    property real viewportScaleDisplayBase: 0.01
-    property real defaultViewportScale: 0.001
+    // 需求：把旧缩放体系中的 35% 重新标记为界面上的 100%。
+    // 注意：显示标定基准与绘制最小尺度基准分开，避免 100% 被强行撑回旧 100% 的大小。
+    property real viewportLegacyScaleBase: 0.01
+    property real viewportScaleDisplayBase: viewportLegacyScaleBase * 0.35
+    property real defaultViewportScale: viewportScaleDisplayBase
     property real viewportScale: defaultViewportScale
-    property real minViewportScale: 0.000001
-    property real maxViewportScale: 10.0
+    property real minViewportScale: viewportScaleDisplayBase * 0.01
+    property real maxViewportScale: viewportScaleDisplayBase * 20.0
     property real viewportOffsetX: 0.0
     property real viewportOffsetY: 0.0
     property real lastMouseX: 0.0
@@ -56,15 +57,19 @@ ApplicationWindow {
     property string selectedObjectDescription: "请在视口中点击点、边或闭合面。"
     property string resultOverlayMode: "none"
     property real leftPanelWidth: 300
-    property real rightPanelWidth: 380
+    property real rightPanelWidth: 420
     property real defaultLeftPanelWidth: 300
-    property real defaultRightPanelWidth: 380
+    property real defaultRightPanelWidth: 420
     property real minLeftPanelWidth: 240
-    property real minRightPanelWidth: 320
+    property real minRightPanelWidth: 360
     property real minCenterPanelWidth: 620
     property real maxLeftPanelWidth: 420
-    property real maxRightPanelWidth: 520
+    property real maxRightPanelWidth: 560
     property real splitterWidth: 8
+    // v0.2.0 UI polish: conservative button metrics.
+    property int uiButtonHeight: 34
+    property int uiButtonCompactHeight: 30
+    property int uiButtonHPadding: 12
 
     component PanelResizeHandle: Item {
         // Drag resizing is intentionally disabled.
@@ -788,9 +793,10 @@ ApplicationWindow {
         var maxDrawW = viewport.width * 0.68
         var maxDrawH = viewport.height * 0.62
         var drawScale = Math.min(maxDrawW / modelW, maxDrawH / modelH) * root.viewportScale
-        // 上一版 1% 视图对应的最小绘制尺度是 48。
-        // 现在将该大小标定为 100%，并让绘制尺度随 viewportScale 线性缩放。
-        drawScale = Math.max(48.0 * (root.viewportScale / root.viewportScaleDisplayBase), drawScale)
+        // 旧缩放体系中 viewportLegacyScaleBase 对应的最小绘制尺度是 48。
+        // 当前 UI 把旧 35% 显示为 100%，但绘制尺寸仍按旧物理基准缩放，
+        // 因此新 100% 的最小绘制尺度为 48 * 0.35 = 16.8。
+        drawScale = Math.max(48.0 * (root.viewportScale / root.viewportLegacyScaleBase), drawScale)
         root.sketchDrawScale = drawScale
         root.lastModelBoundsW = modelW * drawScale
         root.lastModelBoundsH = modelH * drawScale
@@ -2072,10 +2078,42 @@ ApplicationWindow {
 
                     Item { Layout.fillWidth: true }
 
-                    Button { text: "新建工程"; enabled: !bridge.isBusy; onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false } }
-                    Button { text: "打开工程"; enabled: !bridge.isBusy; onClicked: openProjectDialog.open() }
-                    Button { text: "保存工程"; enabled: !bridge.isBusy; onClicked: root.saveCurrentProjectWithDialogFallback() }
-                    Button { text: "另存为"; enabled: !bridge.isBusy; onClicked: saveProjectDialog.open() }
+                    Button {
+                        Layout.preferredHeight: root.uiButtonHeight
+                        leftPadding: root.uiButtonHPadding
+                        rightPadding: root.uiButtonHPadding
+                        font.pixelSize: 12
+                        text: "新建工程"
+                        enabled: !bridge.isBusy
+                        onClicked: { bridge.newProject(); bridge.createEmptySketchForActivePart(); root.resultOverlayMode = "none"; root.hasQueryMarker = false }
+                    }
+                    Button {
+                        Layout.preferredHeight: root.uiButtonHeight
+                        leftPadding: root.uiButtonHPadding
+                        rightPadding: root.uiButtonHPadding
+                        font.pixelSize: 12
+                        text: "打开工程"
+                        enabled: !bridge.isBusy
+                        onClicked: openProjectDialog.open()
+                    }
+                    Button {
+                        Layout.preferredHeight: root.uiButtonHeight
+                        leftPadding: root.uiButtonHPadding
+                        rightPadding: root.uiButtonHPadding
+                        font.pixelSize: 12
+                        text: "保存工程"
+                        enabled: !bridge.isBusy
+                        onClicked: root.saveCurrentProjectWithDialogFallback()
+                    }
+                    Button {
+                        Layout.preferredHeight: root.uiButtonHeight
+                        leftPadding: root.uiButtonHPadding
+                        rightPadding: root.uiButtonHPadding
+                        font.pixelSize: 12
+                        text: "另存为"
+                        enabled: !bridge.isBusy
+                        onClicked: saveProjectDialog.open()
+                    }
                 }
             }
 
@@ -2173,7 +2211,15 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            Button { text: "清空选择"; onClicked: root.clearSelection() }
+                            Button {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: root.uiButtonHeight
+                                leftPadding: root.uiButtonHPadding
+                                rightPadding: root.uiButtonHPadding
+                                font.pixelSize: 12
+                                text: "清空选择"
+                                onClicked: root.clearSelection()
+                            }
 
                             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
@@ -2230,9 +2276,30 @@ ApplicationWindow {
                                 spacing: 8
                                 Label { text: "视口"; font.pixelSize: 15; font.bold: true; color: "#0F172A" }
                                 Item { Layout.fillWidth: true }
-                                Button { text: "适配视图"; onClicked: root.resetViewportTransform() }
-                                Button { text: "放大"; onClicked: root.zoomViewportBy(1.15) }
-                                Button { text: "缩小"; onClicked: root.zoomViewportBy(1.0 / 1.15) }
+                                Button {
+                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                    leftPadding: root.uiButtonHPadding
+                                    rightPadding: root.uiButtonHPadding
+                                    font.pixelSize: 12
+                                    text: "适配视图"
+                                    onClicked: root.resetViewportTransform()
+                                }
+                                Button {
+                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                    leftPadding: root.uiButtonHPadding
+                                    rightPadding: root.uiButtonHPadding
+                                    font.pixelSize: 12
+                                    text: "放大"
+                                    onClicked: root.zoomViewportBy(1.15)
+                                }
+                                Button {
+                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                    leftPadding: root.uiButtonHPadding
+                                    rightPadding: root.uiButtonHPadding
+                                    font.pixelSize: 12
+                                    text: "缩小"
+                                    onClicked: root.zoomViewportBy(1.0 / 1.15)
+                                }
                             }
                         }
 
@@ -2435,21 +2502,36 @@ ApplicationWindow {
 
                                     Label { text: "建模工具"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
 
-                                    RowLayout {
+                                    Flow {
                                         Layout.fillWidth: true
                                         spacing: 6
                                         Repeater {
                                             model: ["选择", "添加节点", "连接边", "移动节点", "删除"]
                                             delegate: Button {
+                                                width: 86
+                                                height: root.uiButtonCompactHeight
+                                                leftPadding: root.uiButtonHPadding
+                                                rightPadding: root.uiButtonHPadding
+                                                font.pixelSize: 12
                                                 text: modelData
                                                 onClicked: root.setModelingTool(modelData)
                                             }
                                         }
                                         Button {
+                                            width: 92
+                                            height: root.uiButtonCompactHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "移动视图"
                                             onClicked: root.setModelingTool("移动视图")
                                         }
                                         Button {
+                                            width: 92
+                                            height: root.uiButtonCompactHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "视图复位"
                                             onClicked: {
                                                 root.viewportPanMode = false
@@ -2462,17 +2544,49 @@ ApplicationWindow {
 
                                     FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
                                     FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
-                                    Button { text: "按坐标添加点"; onClicked: bridge.addModelPoint(Number(pointXField.text), Number(pointYField.text)) }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "按坐标添加点"
+                                        onClicked: bridge.addModelPoint(Number(pointXField.text), Number(pointYField.text))
+                                    }
 
                                     FormField { id: edgeStartField; Layout.fillWidth: true; label: "起点 ID"; text: "p1" }
                                     FormField { id: edgeEndField; Layout.fillWidth: true; label: "终点 ID"; text: "p2" }
-                                    Button { text: "连接边"; onClicked: bridge.connectModelEdge(edgeStartField.text, edgeEndField.text) }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "连接边"
+                                        onClicked: bridge.connectModelEdge(edgeStartField.text, edgeEndField.text)
+                                    }
 
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "生成闭合面"; onClicked: bridge.buildModelFaces() }
-                                        Button { text: "清空几何"; onClicked: bridge.clearModelGeometry() }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "生成闭合面"
+                                            onClicked: bridge.buildModelFaces()
+                                        }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "清空几何"
+                                            onClicked: bridge.clearModelGeometry()
+                                        }
                                     }
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
@@ -2547,7 +2661,15 @@ ApplicationWindow {
                                         }
                                     }
 
-                                    Button { text: "打开材料编辑器"; onClicked: materialEditorDialog.open() }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "打开材料编辑器"
+                                        onClicked: materialEditorDialog.open()
+                                    }
 
                                     Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
                                     TextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
@@ -2575,8 +2697,26 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "生成网格"; enabled: !bridge.isBusy; onClicked: bridge.generateMeshAsync(Number(meshTargetSizeField.text), Number(meshMinAngleField.text)) }
-                                        Button { text: "清除网格"; enabled: !bridge.isBusy; onClicked: bridge.clearMesh() }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "生成网格"
+                                            enabled: !bridge.isBusy
+                                            onClicked: bridge.generateMeshAsync(Number(meshTargetSizeField.text), Number(meshMinAngleField.text))
+                                        }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "清除网格"
+                                            enabled: !bridge.isBusy
+                                            onClicked: bridge.clearMesh()
+                                        }
                                     }
                                     Text { text: "网格后端状态：" + (bridge.currentMeshType === "none" ? "未生成" : bridge.currentMeshType); color: "#334155" }
                                     Text { text: "节点数：" + bridge.sketchMeshNodeCount; color: "#334155" }
@@ -2629,8 +2769,24 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "删除约束"; onClicked: bridge.deleteBoundaryCondition(deleteBcField.text) }
-                                        Button { text: "清空约束"; onClicked: bridge.clearConstraints() }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "删除约束"
+                                            onClicked: bridge.deleteBoundaryCondition(deleteBcField.text)
+                                        }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "清空约束"
+                                            onClicked: bridge.clearConstraints()
+                                        }
                                     }
                                     TextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.boundaryConditionRowsPreview }
 
@@ -2690,8 +2846,24 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
-                                        Button { text: "删除载荷"; onClicked: bridge.deleteLoad(deleteLoadField.text) }
-                                        Button { text: "清空载荷"; onClicked: bridge.clearLoads() }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "删除载荷"
+                                            onClicked: bridge.deleteLoad(deleteLoadField.text)
+                                        }
+                                        Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
+                                            text: "清空载荷"
+                                            onClicked: bridge.clearLoads()
+                                        }
                                     }
                                     TextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.loadRowsPreview }
                                 }
@@ -2712,18 +2884,49 @@ ApplicationWindow {
                                     spacing: 8
 
                                     Label { text: "求解结果"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Button { text: "求解当前模型"; enabled: !bridge.isBusy; onClicked: bridge.solveCurrentModelAsync() }
-                                    Text { text: "求解状态：" + bridge.statusText; color: "#334155"; wrapMode: Text.WordWrap }
-                                    Text { text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155" }
-                                    Text { text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155" }
-                                    Text { text: "Warning 数量：" + bridge.warningCount; color: "#334155" }
-                                    Text { text: "云图缓存：" + (bridge.contourCacheValid ? bridge.contourCacheSummaryText : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
-                                    Text { text: "图片缓存：" + (bridge.contourImageCacheValid ? bridge.contourImageCacheDir : "已失效，请重新求解"); color: "#64748B"; wrapMode: Text.WordWrap }
-
-                                    RowLayout {
+                                    Button {
                                         Layout.fillWidth: true
-                                        spacing: 8
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "求解当前模型"
+                                        enabled: !bridge.isBusy
+                                        onClicked: bridge.solveCurrentModelAsync()
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "求解状态：" + bridge.statusText
+                                        color: "#334155"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                    Text { Layout.fillWidth: true; text: "最大位移：" + (bridge.maxDisplacement === "" ? "—" : bridge.maxDisplacement); color: "#334155"; elide: Text.ElideRight }
+                                    Text { Layout.fillWidth: true; text: "最大 Von Mises：" + (bridge.maxVonMises === "" ? "—" : bridge.maxVonMises); color: "#334155"; elide: Text.ElideRight }
+                                    Text { Layout.fillWidth: true; text: "Warning 数量：" + bridge.warningCount; color: "#334155"; elide: Text.ElideRight }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "云图缓存：" + (bridge.contourCacheValid ? "已生成" : "已失效，请重新求解")
+                                        color: "#64748B"
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "图片缓存：" + (bridge.contourImageCacheValid ? "已生成" : "已失效，请重新求解")
+                                        color: "#64748B"
+                                        elide: Text.ElideRight
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
                                         Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "显示变形示意图"
                                             onClicked: {
                                                 if (!root.ensureContourImageCacheAvailable()) {
@@ -2733,6 +2936,11 @@ ApplicationWindow {
                                             }
                                         }
                                         Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "显示位移云图"
                                             onClicked: {
                                                 if (!root.ensureContourImageCacheAvailable()) {
@@ -2742,6 +2950,11 @@ ApplicationWindow {
                                             }
                                         }
                                         Button {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.uiButtonHeight
+                                            leftPadding: root.uiButtonHPadding
+                                            rightPadding: root.uiButtonHPadding
+                                            font.pixelSize: 12
                                             text: "显示应力云图"
                                             onClicked: {
                                                 if (!root.ensureContourImageCacheAvailable()) {
@@ -2768,11 +2981,51 @@ ApplicationWindow {
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "导出"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Button { text: "导出节点结果"; onClicked: bridge.exportNodeResults("outputs/latest") }
-                                    Button { text: "导出单元结果"; onClicked: bridge.exportElementResults("outputs/latest") }
-                                    Button { text: "导出位移云图数据"; onClicked: bridge.exportDisplacementContourData("outputs/latest") }
-                                    Button { text: "导出应力云图数据"; onClicked: bridge.exportStressContourData("outputs/latest") }
-                                    Button { text: "导出全部结果"; onClicked: bridge.exportResults("outputs/latest") }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "导出节点结果"
+                                        onClicked: bridge.exportNodeResults("outputs/latest")
+                                    }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "导出单元结果"
+                                        onClicked: bridge.exportElementResults("outputs/latest")
+                                    }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "导出位移云图数据"
+                                        onClicked: bridge.exportDisplacementContourData("outputs/latest")
+                                    }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "导出应力云图数据"
+                                        onClicked: bridge.exportStressContourData("outputs/latest")
+                                    }
+                                    Button {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        leftPadding: root.uiButtonHPadding
+                                        rightPadding: root.uiButtonHPadding
+                                        font.pixelSize: 12
+                                        text: "导出全部结果"
+                                        onClicked: bridge.exportResults("outputs/latest")
+                                    }
                                 }
                             }
                         }
@@ -2785,16 +3038,137 @@ ApplicationWindow {
     Rectangle {
         id: busyOverlay
         anchors.fill: parent
-        visible: bridge.isBusy
+        visible: bridge.isBusy || busyOverlay.visualFinishActive
         color: "#66000000"
         z: 9999
+
         property real flowOffset: -0.4
         property real busyVisualProgress: 0
+        property real busyTargetProgress: 0
         property double busyStartMs: 0
-        property bool busyWasActive: false
+        property bool backendBusyWasActive: false
+        property bool visualFinishActive: false
+        property string displayTitle: bridge.busyTitle
+        property string displayMessage: bridge.busyMessage
+        property string displayStage: bridge.busyStage
+        property string displayMode: bridge.busyProgressMode
+
+        function clampProgress(value) {
+            var numberValue = Number(value)
+            if (!isFinite(numberValue)) {
+                return 0
+            }
+            return Math.max(0, Math.min(100, numberValue))
+        }
+
+        function refreshDisplayTextFromBridge() {
+            busyOverlay.displayTitle = bridge.busyTitle
+            busyOverlay.displayMessage = root.busyOverlayMessage()
+            busyOverlay.displayStage = bridge.busyStage
+            busyOverlay.displayMode = bridge.busyProgressMode
+        }
+
+        function currentFakeTarget() {
+            var elapsed = Date.now() - busyOverlay.busyStartMs
+            return root.fakeProgressAt(
+                elapsed,
+                bridge.busyEstimatedMs,
+                bridge.busyHoldProgress
+            )
+        }
+
+        function currentTargetProgress() {
+            if (busyOverlay.visualFinishActive) {
+                return 100
+            }
+
+            var realTarget = busyOverlay.clampProgress(bridge.busyProgress)
+            var mode = bridge.busyProgressMode
+
+            if (mode === "fake_determinate") {
+                return busyOverlay.clampProgress(Math.max(realTarget, busyOverlay.currentFakeTarget()))
+            }
+
+            if (mode === "determinate") {
+                return realTarget
+            }
+
+            return busyOverlay.busyVisualProgress
+        }
+
+        function updateBusyVisualProgress() {
+            if (bridge.isBusy) {
+                busyOverlay.refreshDisplayTextFromBridge()
+            }
+
+            var target = busyOverlay.currentTargetProgress()
+
+            // 视觉进度只前进，不因为真实阶段回退或状态刷新而倒退。
+            if (target < busyOverlay.busyVisualProgress) {
+                target = busyOverlay.busyVisualProgress
+            }
+
+            busyOverlay.busyTargetProgress = target
+
+            var diff = target - busyOverlay.busyVisualProgress
+            if (diff > 0.01) {
+                // 平滑追赶：差距越大追得略快，但限制单帧最大跳变，避免 2% -> 97% 瞬跳。
+                var baseStep = busyOverlay.visualFinishActive ? 0.65 : 0.22
+                var dynamicStep = Math.max(baseStep, diff * 0.028)
+                var maxStep = busyOverlay.visualFinishActive ? 1.15 : 0.85
+                var step = Math.min(dynamicStep, maxStep)
+                busyOverlay.busyVisualProgress = Math.min(busyOverlay.busyVisualProgress + step, target)
+            }
+
+            if (busyOverlay.visualFinishActive && busyOverlay.busyVisualProgress >= 99.8) {
+                busyOverlay.busyVisualProgress = 100
+                if (!busyFinishCloseTimer.running) {
+                    busyFinishCloseTimer.start()
+                }
+            }
+        }
+
+        function startVisualBusy() {
+            busyFinishCloseTimer.stop()
+            busyOverlay.visualFinishActive = false
+            busyOverlay.backendBusyWasActive = true
+            busyOverlay.busyStartMs = Date.now()
+            busyOverlay.busyVisualProgress = 0
+            busyOverlay.busyTargetProgress = 0
+            busyOverlay.refreshDisplayTextFromBridge()
+        }
+
+        function startVisualFinish() {
+            // 后端任务已经完成，但前端遮罩先保留，让视觉进度平滑走到 100% 后再关闭。
+            if (!busyOverlay.backendBusyWasActive) {
+                return
+            }
+
+            busyOverlay.backendBusyWasActive = false
+            busyOverlay.visualFinishActive = true
+            busyOverlay.displayMode = "fake_determinate"
+            busyOverlay.displayMessage = busyOverlay.displayMessage === "" ? "完成" : "完成"
+            busyOverlay.displayStage = "完成"
+            busyOverlay.busyTargetProgress = 100
+
+            if (busyOverlay.busyVisualProgress < 1) {
+                busyOverlay.busyVisualProgress = 1
+            }
+        }
+
+        function clearVisualBusy() {
+            busyOverlay.visualFinishActive = false
+            busyOverlay.backendBusyWasActive = false
+            busyOverlay.busyVisualProgress = 0
+            busyOverlay.busyTargetProgress = 0
+            busyOverlay.displayTitle = ""
+            busyOverlay.displayMessage = ""
+            busyOverlay.displayStage = ""
+            busyOverlay.displayMode = "determinate"
+        }
 
         NumberAnimation on flowOffset {
-            running: busyOverlay.visible && bridge.busyProgressMode === "indeterminate"
+            running: busyOverlay.visible && busyOverlay.displayMode === "indeterminate"
             loops: Animation.Infinite
             from: -0.4
             to: 1.2
@@ -2805,16 +3179,15 @@ ApplicationWindow {
             id: fakeProgressTimer
             interval: 16
             repeat: true
-            running: bridge.isBusy && bridge.busyProgressMode === "fake_determinate"
-            onTriggered: {
-                var now = Date.now()
-                var elapsed = now - busyOverlay.busyStartMs
-                busyOverlay.busyVisualProgress = root.fakeProgressAt(
-                    elapsed,
-                    bridge.busyEstimatedMs,
-                    bridge.busyHoldProgress
-                )
-            }
+            running: busyOverlay.visible && busyOverlay.displayMode !== "indeterminate"
+            onTriggered: busyOverlay.updateBusyVisualProgress()
+        }
+
+        Timer {
+            id: busyFinishCloseTimer
+            interval: 320
+            repeat: false
+            onTriggered: busyOverlay.clearVisualBusy()
         }
 
         Connections {
@@ -2822,16 +3195,13 @@ ApplicationWindow {
 
             function onBusyStateChanged() {
                 if (bridge.isBusy) {
-                    if (!busyOverlay.busyWasActive && bridge.busyProgressMode === "fake_determinate") {
-                        busyOverlay.busyStartMs = Date.now()
-                        busyOverlay.busyVisualProgress = 0
-                    } else if (bridge.busyProgressMode === "determinate") {
-                        busyOverlay.busyVisualProgress = bridge.busyProgress
+                    if (!busyOverlay.backendBusyWasActive || busyOverlay.visualFinishActive) {
+                        busyOverlay.startVisualBusy()
+                    } else {
+                        busyOverlay.refreshDisplayTextFromBridge()
                     }
-                    busyOverlay.busyWasActive = true
                 } else {
-                    busyOverlay.busyVisualProgress = 0
-                    busyOverlay.busyWasActive = false
+                    busyOverlay.startVisualFinish()
                 }
             }
         }
@@ -2855,7 +3225,7 @@ ApplicationWindow {
                 spacing: 12
 
                 Label {
-                    text: bridge.busyTitle
+                    text: busyOverlay.displayTitle
                     font.bold: true
                     font.pixelSize: 16
                     color: "#0F172A"
@@ -2863,7 +3233,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.fillWidth: true
-                    text: root.busyOverlayMessage()
+                    text: busyOverlay.displayMessage
                     wrapMode: Text.WordWrap
                     color: "#475569"
                 }
@@ -2872,22 +3242,14 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     from: 0
                     to: 100
-                    value: bridge.busyProgress
-                    visible: bridge.busyProgressMode === "determinate"
-                }
-
-                ProgressBar {
-                    Layout.fillWidth: true
-                    from: 0
-                    to: 100
                     value: busyOverlay.busyVisualProgress
-                    visible: bridge.busyProgressMode === "fake_determinate"
+                    visible: busyOverlay.displayMode !== "indeterminate"
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 12
-                    visible: bridge.busyProgressMode === "indeterminate"
+                    visible: busyOverlay.displayMode === "indeterminate"
                     radius: 6
                     color: "#E2E8F0"
                     clip: true
@@ -2908,17 +3270,15 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
-                        text: bridge.busyStage
+                        text: busyOverlay.displayStage
                         color: "#64748B"
                         font.pixelSize: 12
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: bridge.busyProgressMode === "indeterminate"
+                        text: busyOverlay.displayMode === "indeterminate"
                               ? "处理中..."
-                              : ((bridge.busyProgressMode === "fake_determinate"
-                                  ? Math.round(busyOverlay.busyVisualProgress)
-                                  : bridge.busyProgress) + "%")
+                              : (Math.round(busyOverlay.busyVisualProgress) + "%")
                         color: "#0F172A"
                         font.pixelSize: 12
                     }

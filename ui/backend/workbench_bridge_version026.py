@@ -251,7 +251,7 @@ class WorkbenchBridge(QObject):
         self.section_rows_preview = ""
         self.face_material_rows_preview = ""
         self.active_part_face_material_json = "[]"
-        self.mesh_target_size = 0.8
+        self.mesh_target_size = 0.25
         self.mesh_max_area = 0.0
         self.mesh_min_angle = 25.0
         self.mesh_quality_summary_text = ""
