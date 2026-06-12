@@ -301,21 +301,78 @@ ApplicationWindow {
         id: control
         implicitHeight: root.uiButtonHeight
         font.pixelSize: 12
+
+        // 统一修复下拉选择框文字颜色：
+        // 选中 / 悬停 / 按下状态都使用浅色背景 + 深色文字，避免原生样式出现蓝底白字或文字被覆盖。
+        palette.text: root.uiTextColor
+        palette.buttonText: root.uiTextColor
+        palette.windowText: root.uiTextColor
+        palette.highlight: "#EAF2FB"
+        palette.highlightedText: root.uiTextColor
+
+        contentItem: Item {
+            implicitWidth: comboDisplayText.implicitWidth + 40
+            implicitHeight: root.uiButtonHeight
+
+            Text {
+                id: comboDisplayText
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 10
+                anchors.rightMargin: 30
+                text: control.displayText
+                font: control.font
+                color: control.enabled ? root.uiTextColor : "#94A3B8"
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+        }
+
         background: Rectangle {
             radius: root.uiControlRadius
             color: control.enabled ? root.uiCardColor : "#E5E7EB"
             border.color: control.activeFocus ? root.uiFocusBlue : (control.hovered ? "#C7D8EC" : root.uiBorderColor)
             border.width: 1.0
         }
+
         delegate: ItemDelegate {
+            id: optionDelegate
             width: control.width
             height: 34
-            text: modelData
-            font.pixelSize: 12
             highlighted: control.highlightedIndex === index
+            hoverEnabled: true
+            clip: true
+            property bool optionSelected: control.currentIndex === index
+            palette.text: root.uiTextColor
+            palette.buttonText: root.uiTextColor
+            palette.highlight: "#EAF2FB"
+            palette.highlightedText: root.uiTextColor
+
+            contentItem: Item {
+                implicitWidth: optionText.implicitWidth + 20
+                implicitHeight: optionDelegate.height
+
+                Text {
+                    id: optionText
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    text: modelData
+                    font.pixelSize: 12
+                    color: root.uiTextColor
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                }
+            }
+
             background: Rectangle {
                 radius: 8
-                color: highlighted ? "#EAF2FB" : "transparent"
+                color: (optionDelegate.highlighted || optionDelegate.optionSelected) ? "#EAF2FB" : (optionDelegate.hovered ? "#F5F8FC" : "transparent")
+                border.color: (optionDelegate.highlighted || optionDelegate.optionSelected) ? "#C7D8EC" : "transparent"
+                border.width: 1.0
             }
         }
         popup: Popup {
@@ -591,6 +648,28 @@ ApplicationWindow {
         } catch (e) {
             return []
         }
+    }
+
+    function boundaryConditionOptionsFromJson() {
+        var rows = root.boundaryConditions()
+        var options = []
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i]
+            var targetType = String(row.target_type || row.targetType || "")
+            var targetId = String(row.target_id || row.targetId || "")
+            var ux = row.ux_fixed === undefined ? row.uxFixed : row.ux_fixed
+            var uy = row.uy_fixed === undefined ? row.uyFixed : row.uy_fixed
+            options.push(String(row.id) + " | " + targetType + ":" + targetId + " | ux=" + (ux ? "1" : "0") + " uy=" + (uy ? "1" : "0"))
+        }
+        return options
+    }
+
+    function parseBoundaryConditionId(optionText) {
+        var raw = String(optionText || "")
+        if (raw === "") {
+            return ""
+        }
+        return raw.split("|")[0].trim()
     }
 
     function loads() {
@@ -2841,7 +2920,7 @@ Rectangle {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 48
+                            Layout.preferredHeight: 62
                             color: root.uiCardColor
                             border.color: root.uiBorderColor
 
@@ -2851,11 +2930,11 @@ Rectangle {
                                 spacing: 8
                                 Rectangle {
                                     id: floatingWorkflowBar
-                                    Layout.preferredWidth: 560
-                                    Layout.minimumWidth: 460
-                                    Layout.maximumWidth: 660
-                                    Layout.preferredHeight: 34
-                                    radius: 16
+                                    Layout.preferredWidth: 650
+                                    Layout.minimumWidth: 560
+                                    Layout.maximumWidth: 760
+                                    Layout.preferredHeight: 40
+                                    radius: 18
                                     color: "#F8FBFF"
                                     border.color: "#C4D3E5"
                                     border.width: 1.0
@@ -2865,16 +2944,16 @@ Rectangle {
                                         anchors.fill: parent
                                         anchors.leftMargin: 6
                                         anchors.rightMargin: 6
-                                        anchors.topMargin: 4
-                                        anchors.bottomMargin: 4
-                                        spacing: 5
+                                        anchors.topMargin: 5
+                                        anchors.bottomMargin: 5
+                                        spacing: 6
 
                                         Repeater {
                                             model: ["建模与材料", "网格生成", "约束与载荷", "求解结果"]
                                             delegate: Rectangle {
                                                 Layout.fillWidth: true
                                                 Layout.fillHeight: true
-                                                radius: 13
+                                                radius: 15
                                                 color: modelData === root.currentMode ? "#E8F1FF" : "#FFFFFF"
                                                 border.color: modelData === root.currentMode ? "#86A9D8" : "#D4DEE9"
                                                 border.width: 1.0
@@ -2887,17 +2966,17 @@ Rectangle {
                                                     spacing: 5
 
                                                     Rectangle {
-                                                        Layout.preferredWidth: 20
-                                                        Layout.preferredHeight: 20
+                                                        Layout.preferredWidth: 22
+                                                        Layout.preferredHeight: 22
                                                         Layout.alignment: Qt.AlignVCenter
-                                                        radius: 10
+                                                        radius: 11
                                                         color: modelData === root.currentMode ? "#D5E5FA" : "#F1F5F9"
                                                         border.color: modelData === root.currentMode ? "#7FA2D0" : "#D3DCE8"
                                                         Text {
                                                             anchors.centerIn: parent
                                                             text: String(index + 1)
                                                             color: modelData === root.currentMode ? "#244B78" : "#64748B"
-                                                            font.pixelSize: 10
+                                                            font.pixelSize: 12
                                                             font.bold: true
                                                         }
                                                     }
@@ -2907,7 +2986,7 @@ Rectangle {
                                                         Layout.alignment: Qt.AlignVCenter
                                                         text: modelData
                                                         color: modelData === root.currentMode ? "#163B65" : "#334155"
-                                                        font.pixelSize: 11
+                                                        font.pixelSize: 12
                                                         font.bold: modelData === root.currentMode
                                                         horizontalAlignment: Text.AlignLeft
                                                         verticalAlignment: Text.AlignVCenter
@@ -2927,43 +3006,48 @@ Rectangle {
                                 }
                                 Item { Layout.fillWidth: true }
                                 WorkbenchButton {
+                                    Layout.preferredWidth: 64
                                     Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
+                                    leftPadding: 6
+                                    rightPadding: 6
+                                    font.pixelSize: 11
                                     text: "适配视图"
                                     onClicked: root.resetViewportTransform()
                                 }
                                 WorkbenchButton {
+                                    Layout.preferredWidth: 48
                                     Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
+                                    leftPadding: 6
+                                    rightPadding: 6
+                                    font.pixelSize: 11
                                     text: "放大"
                                     onClicked: root.zoomViewportBy(1.15)
                                 }
                                 WorkbenchButton {
+                                    Layout.preferredWidth: 48
                                     Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
+                                    leftPadding: 6
+                                    rightPadding: 6
+                                    font.pixelSize: 11
                                     text: "缩小"
                                     onClicked: root.zoomViewportBy(1.0 / 1.15)
                                 }
                                 WorkbenchButton {
+                                    Layout.preferredWidth: 64
                                     Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
+                                    leftPadding: 6
+                                    rightPadding: 6
+                                    font.pixelSize: 11
                                     text: "移动视图"
                                     visualRole: root.viewportPanMode ? "strongPrimary" : "neutral"
                                     onClicked: root.setModelingTool("移动视图")
                                 }
                                 WorkbenchButton {
+                                    Layout.preferredWidth: 64
                                     Layout.preferredHeight: root.uiButtonCompactHeight
-                                    leftPadding: root.uiButtonHPadding
-                                    rightPadding: root.uiButtonHPadding
-                                    font.pixelSize: 12
+                                    leftPadding: 6
+                                    rightPadding: 6
+                                    font.pixelSize: 11
                                     text: "视图复位"
                                     onClicked: {
                                         root.viewportPanMode = false
@@ -3536,18 +3620,24 @@ Rectangle {
                                     spacing: 8
 
                                     Label { text: "约束与载荷"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.WordWrap
-                                        text: bridge.selectedTargetType === "" ? "当前目标：未选择" : "当前目标：" + bridge.selectedTargetType + " | " + bridge.selectedTargetId
-                                        color: "#334155"
-                                    }
 
-                                    WorkbenchCheckBox {
-                                        id: gravityEnabledBox
-                                        text: "求解时考虑自重"
-                                        checked: bridge.gravityEnabled
-                                        onToggled: bridge.setGravityEnabled(checked)
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Text {
+                                            Layout.fillWidth: true
+                                            Layout.alignment: Qt.AlignVCenter
+                                            wrapMode: Text.WordWrap
+                                            text: bridge.selectedTargetType === "" ? "当前目标：未选择" : "当前目标：" + bridge.selectedTargetType + " | " + bridge.selectedTargetId
+                                            color: "#334155"
+                                        }
+                                        WorkbenchCheckBox {
+                                            id: gravityEnabledBox
+                                            Layout.alignment: Qt.AlignVCenter
+                                            text: "求解时考虑自重"
+                                            checked: bridge.gravityEnabled
+                                            onToggled: bridge.setGravityEnabled(checked)
+                                        }
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -3556,11 +3646,28 @@ Rectangle {
                                         wrapMode: Text.WordWrap
                                     }
 
-                                    WorkbenchCheckBox { id: uxFixedBox; text: "固定 Ux"; checked: true }
-                                    WorkbenchCheckBox { id: uyFixedBox; text: "固定 Uy"; checked: true }
-                                    WorkbenchButton { text: "添加约束"; onClicked: bridge.addConstraintToSelectedTarget(uxFixedBox.checked, uyFixedBox.checked) }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        WorkbenchCheckBox { id: uxFixedBox; Layout.fillWidth: true; text: "固定 Ux"; checked: true }
+                                        WorkbenchCheckBox { id: uyFixedBox; Layout.fillWidth: true; text: "固定 Uy"; checked: true }
+                                    }
+                                    WorkbenchButton {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        text: "添加约束"
+                                        visualRole: "primary"
+                                        onClicked: bridge.addConstraintToSelectedTarget(uxFixedBox.checked, uyFixedBox.checked)
+                                    }
 
-                                    FormField { id: deleteBcField; Layout.fillWidth: true; label: "删除约束 ID"; text: "bc_1" }
+                                    Label { text: "删除约束"; color: "#334155"; font.pixelSize: 12 }
+                                    WorkbenchComboBox {
+                                        id: deleteBcCombo
+                                        Layout.fillWidth: true
+                                        model: root.boundaryConditionOptionsFromJson()
+                                        currentIndex: count > 0 ? 0 : -1
+                                        displayText: count > 0 ? currentText : "暂无约束"
+                                    }
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
@@ -3571,7 +3678,12 @@ Rectangle {
                                             rightPadding: root.uiButtonHPadding
                                             font.pixelSize: 12
                                             text: "删除约束"
-                                            onClicked: bridge.deleteBoundaryCondition(deleteBcField.text)
+                                            onClicked: {
+                                                var bcId = root.parseBoundaryConditionId(deleteBcCombo.currentText)
+                                                if (bcId !== "") {
+                                                    bridge.deleteBoundaryCondition(bcId)
+                                                }
+                                            }
                                         }
                                         WorkbenchButton {
                                             Layout.fillWidth: true
@@ -3583,19 +3695,28 @@ Rectangle {
                                             onClicked: bridge.clearConstraints()
                                         }
                                     }
-                                    WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.boundaryConditionRowsPreview }
+                                    WorkbenchScrollTextArea { Layout.fillWidth: true; Layout.preferredHeight: 104; readOnly: true; text: bridge.boundaryConditionRowsPreview }
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
                                     Label { text: "载荷"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    FormField { id: loadXField; Layout.fillWidth: true; label: "Fx / qx"; text: "0.0" }
-                                    FormField { id: loadYField; Layout.fillWidth: true; label: "Fy / qy"; text: "-1000.0" }
-                                    FormField { id: loadStartTField; Layout.fillWidth: true; label: "start_t"; text: String(bridge.edgeLoadStartT) }
-                                    FormField { id: loadEndTField; Layout.fillWidth: true; label: "end_t"; text: String(bridge.edgeLoadEndT) }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        FormField { id: loadXField; Layout.fillWidth: true; label: "Fx / qx"; text: "0.0" }
+                                        FormField { id: loadYField; Layout.fillWidth: true; label: "Fy / qy"; text: "-1000.0" }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        FormField { id: loadStartTField; Layout.fillWidth: true; label: "start_t"; text: String(bridge.edgeLoadStartT) }
+                                        FormField { id: loadEndTField; Layout.fillWidth: true; label: "end_t"; text: String(bridge.edgeLoadEndT) }
+                                    }
                                     RowLayout {
                                         Layout.fillWidth: true
                                         spacing: 8
                                         WorkbenchButton {
+                                            Layout.fillWidth: true
                                             text: "整边模式"
                                             onClicked: {
                                                 bridge.useFullEdgeLoadRange()
@@ -3604,6 +3725,7 @@ Rectangle {
                                             }
                                         }
                                         WorkbenchButton {
+                                            Layout.fillWidth: true
                                             text: "应用区间参数"
                                             onClicked: bridge.setSelectedEdgeLoadSegmentRange(
                                                 Number(loadStartTField.text),
@@ -3611,17 +3733,15 @@ Rectangle {
                                             )
                                         }
                                     }
-                                    RowLayout {
+                                    WorkbenchButton {
                                         Layout.fillWidth: true
-                                        spacing: 8
-                                        WorkbenchButton {
-                                            text: bridge.edgeLoadSegmentSelectionMode ? "取消区间设置" : "设置局部载荷区间"
-                                            onClicked: {
-                                                if (bridge.edgeLoadSegmentSelectionMode) {
-                                                    bridge.cancelEdgeLoadSegmentSelection()
-                                                } else {
-                                                    bridge.beginEdgeLoadSegmentSelection()
-                                                }
+                                        Layout.preferredHeight: root.uiButtonHeight
+                                        text: bridge.edgeLoadSegmentSelectionMode ? "取消区间设置" : "设置局部载荷区间"
+                                        onClicked: {
+                                            if (bridge.edgeLoadSegmentSelectionMode) {
+                                                bridge.cancelEdgeLoadSegmentSelection()
+                                            } else {
+                                                bridge.beginEdgeLoadSegmentSelection()
                                             }
                                         }
                                     }
@@ -3629,10 +3749,12 @@ Rectangle {
                                         Layout.fillWidth: true
                                         spacing: 8
                                         WorkbenchButton {
+                                            Layout.fillWidth: true
                                             text: "添加集中力"
                                             onClicked: bridge.addLoadToSelectedTarget("nodal_concentrated", Number(loadXField.text), Number(loadYField.text))
                                         }
                                         WorkbenchButton {
+                                            Layout.fillWidth: true
                                             text: bridge.hasEdgeLoadSegment ? "添加局部均布载荷" : "添加均布载荷"
                                             onClicked: bridge.addLoadToSelectedTarget("edge_uniform", Number(loadXField.text), Number(loadYField.text))
                                         }
@@ -3660,7 +3782,7 @@ Rectangle {
                                             onClicked: bridge.clearLoads()
                                         }
                                     }
-                                    WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 92; readOnly: true; text: bridge.loadRowsPreview }
+                                    WorkbenchScrollTextArea { Layout.fillWidth: true; Layout.preferredHeight: 104; readOnly: true; text: bridge.loadRowsPreview }
                                 }
                             }
 
@@ -3760,9 +3882,15 @@ Rectangle {
                                         }
                                     }
 
-                                    FormField { id: queryXField; Layout.fillWidth: true; label: "查询 X"; text: String(bridge.resultQueryX) }
-                                    FormField { id: queryYField; Layout.fillWidth: true; label: "查询 Y"; text: String(bridge.resultQueryY) }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        FormField { id: queryXField; Layout.fillWidth: true; label: "查询 X"; text: String(bridge.resultQueryX) }
+                                        FormField { id: queryYField; Layout.fillWidth: true; label: "查询 Y"; text: String(bridge.resultQueryY) }
+                                    }
                                     WorkbenchButton {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: root.uiButtonHeight
                                         text: "查询结果"
                                         onClicked: {
                                             root.queryMarkerX = Number(queryXField.text)
@@ -3771,7 +3899,7 @@ Rectangle {
                                             bridge.queryResultAtPoint(Number(queryXField.text), Number(queryYField.text))
                                         }
                                     }
-                                    WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 150; readOnly: true; text: bridge.resultQueryText }
+                                    WorkbenchScrollTextArea { Layout.fillWidth: true; Layout.preferredHeight: 150; readOnly: true; text: bridge.resultQueryText }
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
