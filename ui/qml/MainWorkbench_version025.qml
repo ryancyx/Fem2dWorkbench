@@ -87,15 +87,15 @@ ApplicationWindow {
     property color uiStrongBlue: "#DDEAF8"
     property color uiStrongBlueHover: "#D1E1F4"
     property color uiStrongBluePressed: "#C5D8EE"
-    property color uiDangerRed: "#FFF1F0"
-    property color uiDangerRedHover: "#FBE7E5"
-    property color uiDangerRedPressed: "#F5D8D5"
+    property color uiDangerRed: "#FCE7E4"
+    property color uiDangerRedHover: "#F9D8D3"
+    property color uiDangerRedPressed: "#F2C5BE"
     property color uiPrimaryBorder: "#AFC7E8"
     property color uiPrimaryBorderHover: "#9BBBE2"
     property color uiStrongBorder: "#8FAFDB"
     property color uiStrongBorderHover: "#7FA4D5"
-    property color uiDangerBorder: "#E2A4A0"
-    property color uiDangerBorderHover: "#D8918D"
+    property color uiDangerBorder: "#D36B62"
+    property color uiDangerBorderHover: "#C95E55"
     property color uiNeutralFill: "#FFFFFF"
     property color uiNeutralFillHover: "#F4F7FB"
     property color uiNeutralFillPressed: "#EEF3F8"
@@ -172,7 +172,7 @@ ApplicationWindow {
             return "#2F5E96"
         }
         if (role === "danger") {
-            return "#934540"
+            return "#873A34"
         }
         return "#243244"
     }
@@ -186,49 +186,70 @@ ApplicationWindow {
     }
 
 
-    component WorkbenchButton: Button {
+    component WorkbenchButton: Item {
         id: control
+
+        property string text: ""
         property string visualRole: ""
-        hoverEnabled: true
-        flat: true
+        property int leftPadding: root.uiButtonHPadding
+        property int rightPadding: root.uiButtonHPadding
+        property int topPadding: 6
+        property int bottomPadding: 6
+        property font font: Qt.font({ pixelSize: 12, bold: false })
+        property bool hovered: buttonMouseArea.containsMouse
+        property bool down: buttonMouseArea.pressed
+
+        signal clicked()
 
         function effectiveRole() {
             return visualRole !== "" ? visualRole : root.buttonRoleForText(control.text)
         }
 
         implicitHeight: root.uiButtonHeight
-        implicitWidth: Math.max(92, implicitContentWidth + leftPadding + rightPadding)
-        leftPadding: root.uiButtonHPadding
-        rightPadding: root.uiButtonHPadding
-        topPadding: 6
-        bottomPadding: 6
-        font.pixelSize: 12
-        font.bold: effectiveRole() === "primary" || effectiveRole() === "strongPrimary"
+        implicitWidth: Math.max(92, buttonLabel.implicitWidth + leftPadding + rightPadding)
         opacity: enabled ? 1.0 : 0.72
+        activeFocusOnTab: true
+        clip: true
 
-        contentItem: Text {
+        Rectangle {
+            id: buttonBackground
+            anchors.fill: parent
+            radius: root.uiControlRadius
+            antialiasing: true
+            color: root.buttonFillColor(control.effectiveRole(), control.enabled, control.down, control.hovered)
+            border.color: root.buttonBorderColor(control.effectiveRole(), control.enabled, control.hovered, control.activeFocus)
+            border.width: 1.0
+        }
+
+        Text {
+            id: buttonLabel
+            anchors.fill: parent
+            anchors.leftMargin: control.leftPadding
+            anchors.rightMargin: control.rightPadding
+            anchors.topMargin: control.topPadding
+            anchors.bottomMargin: control.bottomPadding
             text: control.text
             color: root.buttonTextColor(control.effectiveRole(), control.enabled)
             font.pixelSize: control.font.pixelSize
-            font.bold: control.font.bold
+            font.bold: control.font.bold || control.effectiveRole() === "primary" || control.effectiveRole() === "strongPrimary"
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
 
-        background: Item {
-            implicitWidth: 96
-            implicitHeight: root.uiButtonHeight
-
-            Rectangle {
-                anchors.fill: parent
-                radius: root.uiControlRadius
-                antialiasing: true
-                color: root.buttonFillColor(control.effectiveRole(), control.enabled, control.down, control.hovered)
-                border.color: root.buttonBorderColor(control.effectiveRole(), control.enabled, control.hovered, control.activeFocus)
-                border.width: 1.0
-            }
+        MouseArea {
+            id: buttonMouseArea
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: control.enabled
+            cursorShape: Qt.PointingHandCursor
+            onPressed: control.forceActiveFocus()
+            onClicked: control.clicked()
         }
+
+        Keys.onSpacePressed: if (control.enabled) control.clicked()
+        Keys.onReturnPressed: if (control.enabled) control.clicked()
+        Keys.onEnterPressed: if (control.enabled) control.clicked()
     }
 
     component WorkbenchTextArea: TextArea {
@@ -293,6 +314,150 @@ ApplicationWindow {
             elide: Text.ElideRight
         }
     }
+    component DialogCheckOption: Item {
+        id: control
+        property string text: ""
+        property string helperText: ""
+        property bool checked: false
+        property bool hovered: optionMouseArea.containsMouse
+        property bool down: optionMouseArea.pressed
+        signal toggled(bool checked)
+
+        Layout.fillWidth: true
+        implicitHeight: helperText === "" ? 38 : 52
+        implicitWidth: 180
+        activeFocusOnTab: true
+        clip: true
+
+        Rectangle {
+            anchors.fill: parent
+            radius: root.uiControlRadius
+            antialiasing: true
+            color: control.down ? "#EEF3F8" : (control.hovered ? "#F7FAFD" : "#FFFFFF")
+            border.color: control.activeFocus ? root.uiFocusBlue : (control.checked ? root.uiPrimaryBorder : root.uiBorderColor)
+            border.width: 1.0
+        }
+
+        Rectangle {
+            id: optionIndicator
+            width: 18
+            height: 18
+            radius: 5
+            antialiasing: true
+            anchors.left: parent.left
+            anchors.leftMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            color: control.checked ? "#DDEAF8" : "#FFFFFF"
+            border.color: control.checked ? root.uiStrongBorder : (control.hovered ? "#C4D2E3" : root.uiBorderColor)
+            border.width: 1.0
+
+            Text {
+                anchors.centerIn: parent
+                text: control.checked ? "✓" : ""
+                color: "#244B78"
+                font.pixelSize: 13
+                font.bold: true
+            }
+        }
+
+        Column {
+            anchors.left: optionIndicator.right
+            anchors.leftMargin: 10
+            anchors.right: parent.right
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 1
+
+            Text {
+                width: parent.width
+                text: control.text
+                color: control.enabled ? "#243244" : "#94A3B8"
+                font.pixelSize: 12
+                font.bold: control.checked
+                elide: Text.ElideRight
+            }
+
+            Text {
+                width: parent.width
+                visible: control.helperText !== ""
+                text: control.helperText
+                color: "#64748B"
+                font.pixelSize: 10
+                elide: Text.ElideRight
+            }
+        }
+
+        MouseArea {
+            id: optionMouseArea
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: control.enabled
+            cursorShape: Qt.PointingHandCursor
+            onPressed: control.forceActiveFocus()
+            onClicked: {
+                control.checked = !control.checked
+                control.toggled(control.checked)
+            }
+        }
+
+        Keys.onSpacePressed: {
+            if (control.enabled) {
+                control.checked = !control.checked
+                control.toggled(control.checked)
+            }
+        }
+        Keys.onReturnPressed: {
+            if (control.enabled) {
+                control.checked = !control.checked
+                control.toggled(control.checked)
+            }
+        }
+        Keys.onEnterPressed: {
+            if (control.enabled) {
+                control.checked = !control.checked
+                control.toggled(control.checked)
+            }
+        }
+    }
+
+    component DialogSectionTitle: Text {
+        color: "#172033"
+        font.pixelSize: 14
+        font.bold: true
+        elide: Text.ElideRight
+    }
+
+    component DialogMetricRow: Rectangle {
+        property string label: ""
+        property string value: ""
+        Layout.fillWidth: true
+        Layout.preferredHeight: 36
+        radius: root.uiControlRadius
+        color: root.uiPanelSoftColor
+        border.color: root.uiBorderColor
+        border.width: 1.0
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            spacing: 8
+            Text {
+                text: parent.parent.label
+                color: root.uiMutedTextColor
+                font.pixelSize: 11
+            }
+            Text {
+                Layout.fillWidth: true
+                text: parent.parent.value
+                textFormat: Text.RichText
+                color: root.uiTextColor
+                font.pixelSize: 12
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+            }
+        }
+    }
 
     function modelPoints() {
         try {
@@ -300,6 +465,25 @@ ApplicationWindow {
         } catch (e) {
             return []
         }
+    }
+
+    function modelPointOptionsFromJson() {
+        var rows = root.modelPoints()
+        var options = []
+        for (var i = 0; i < rows.length; i++) {
+            var x = Number(rows[i].x)
+            var y = Number(rows[i].y)
+            options.push(String(rows[i].id) + " | x=" + x.toFixed(4) + " y=" + y.toFixed(4))
+        }
+        return options
+    }
+
+    function parsePointIdFromOption(optionText) {
+        var raw = String(optionText || "")
+        if (raw === "") {
+            return ""
+        }
+        return raw.split("|")[0].trim()
     }
 
     function modelEdges() {
@@ -663,6 +847,17 @@ ApplicationWindow {
         root.repaintViewport()
     }
 
+    function zoomViewportAt(factor, mouseX, mouseY) {
+        root.updateViewportGeometryFrame()
+        var before = root.screenToModel(mouseX, mouseY)
+        root.viewportScale = root.clampViewportScale(root.viewportScale * factor)
+        root.updateViewportGeometryFrame()
+        var after = root.screenPoint(before)
+        root.viewportOffsetX += mouseX - after.x
+        root.viewportOffsetY += mouseY - after.y
+        root.repaintViewport()
+    }
+
     function viewportScaleText() {
         var percent = root.viewportScale / root.viewportScaleDisplayBase * 100.0
         if (percent < 0.1) {
@@ -797,8 +992,124 @@ ApplicationWindow {
         return root.interpolateColor(stops[stops.length - 1].color, stops[stops.length - 1].color, 1.0, alpha)
     }
 
+    function trimTrailingZeros(text) {
+        var s = String(text)
+        if (s.indexOf('.') < 0) {
+            return s
+        }
+        while (s.length > 0 && s.charAt(s.length - 1) === '0') {
+            s = s.slice(0, -1)
+        }
+        if (s.length > 0 && s.charAt(s.length - 1) === '.') {
+            s = s.slice(0, -1)
+        }
+        return s === '' || s === '-0' ? '0' : s
+    }
+
+    function formatPlainNumber(value) {
+        var n = Number(value || 0.0)
+        if (!isFinite(n) || Math.abs(n) < 1.0e-15) {
+            return '0'
+        }
+
+        var absValue = Math.abs(n)
+        if (absValue >= 0.001 && absValue < 1000000.0) {
+            var decimals = absValue >= 1000.0 ? 2 : (absValue >= 1.0 ? 3 : 6)
+            return root.trimTrailingZeros(n.toFixed(decimals))
+        }
+
+        var exponent = Math.floor(Math.log(absValue) / Math.LN10)
+        var mantissa = n / Math.pow(10.0, exponent)
+        return root.trimTrailingZeros(mantissa.toFixed(3)) + '×10^' + exponent
+    }
+
+    function formatRichNumber(value) {
+        var n = Number(value || 0.0)
+        if (!isFinite(n) || Math.abs(n) < 1.0e-15) {
+            return '0'
+        }
+
+        var absValue = Math.abs(n)
+        if (absValue >= 0.001 && absValue < 1000000.0) {
+            var decimals = absValue >= 1000.0 ? 2 : (absValue >= 1.0 ? 3 : 6)
+            return root.trimTrailingZeros(n.toFixed(decimals))
+        }
+
+        var exponent = Math.floor(Math.log(absValue) / Math.LN10)
+        var mantissa = n / Math.pow(10.0, exponent)
+        return root.trimTrailingZeros(mantissa.toFixed(3)) + '×10<sup>' + exponent + '</sup>'
+    }
+
     function formatScientific(value) {
-        return Number(value || 0.0).toExponential(4)
+        return root.formatRichNumber(value)
+    }
+
+    function formatCanvasNumber(value) {
+        return root.formatPlainNumber(value)
+    }
+
+    function formatStressKPa(valuePa) {
+        return root.formatRichNumber(Number(valuePa || 0.0) / 1000.0)
+    }
+
+    function displacementDisplayMagnitude() {
+        var data = root.displacementContourData()
+        var minValue = Math.abs(Number((data.min_displacement || 0.0)))
+        var maxValue = Math.abs(Number((data.max_displacement || 0.0)))
+        var value = Math.max(minValue, maxValue)
+        if (!isFinite(value) || value <= 0.0) {
+            var summaryValue = Math.abs(Number(((root.deformationPlotData().summary || {}).max_displacement || 0.0)))
+            value = isFinite(summaryValue) ? summaryValue : 0.0
+        }
+        return value
+    }
+
+    function displacementDisplayScale() {
+        var maxAbs = root.displacementDisplayMagnitude()
+        if (maxAbs >= 1000.0) {
+            return 0.001
+        }
+        if (maxAbs >= 1.0) {
+            return 1.0
+        }
+        if (maxAbs >= 0.001) {
+            return 1000.0
+        }
+        if (maxAbs >= 0.000001) {
+            return 1000000.0
+        }
+        if (maxAbs >= 0.000000001) {
+            return 1000000000.0
+        }
+        return 1.0
+    }
+
+    function displacementUnitLabel() {
+        var maxAbs = root.displacementDisplayMagnitude()
+        if (maxAbs >= 1000.0) {
+            return "km"
+        }
+        if (maxAbs >= 1.0) {
+            return "m"
+        }
+        if (maxAbs >= 0.001) {
+            return "mm"
+        }
+        if (maxAbs >= 0.000001) {
+            return "μm"
+        }
+        if (maxAbs >= 0.000000001) {
+            return "nm"
+        }
+        return "m"
+    }
+
+    function formatDisplacement(value) {
+        return root.formatRichNumber(Number(value || 0.0) * root.displacementDisplayScale())
+    }
+
+    function formatDisplacementWithUnit(value) {
+        return root.formatDisplacement(value) + " " + root.displacementUnitLabel()
     }
 
     function contourScaleText(scaleValue) {
@@ -856,7 +1167,7 @@ ApplicationWindow {
             ctx.moveTo(barX + barWidth, ty)
             ctx.lineTo(barX + barWidth + 8, ty)
             ctx.stroke()
-            ctx.fillText(root.formatScientific(value), barX + barWidth + 12, ty + 4)
+            ctx.fillText(root.formatCanvasNumber(value), barX + barWidth + 12, ty + 4)
         }
         ctx.restore()
     }
@@ -1814,7 +2125,7 @@ ApplicationWindow {
                     label: "弹性模量 (Pa)"
                     text: "210000000000"
                     suffix: "Pa"
-                    placeholderText: "例如 210e9（钢约 210 GPa）"
+                    placeholderText: "例如 210000000000（钢约 210 GPa）"
                 }
                 FormField { id: materialNuField; Layout.fillWidth: true; label: "泊松比"; text: "0.3" }
                 FormField { id: materialUnitWeightField; Layout.fillWidth: true; label: "容重 (N/m³)"; text: "0.0" }
@@ -1822,7 +2133,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "弹性模量当前按 Pa 录入；210 GPa 请填写 210e9 或 210000000000。"
+                    text: "弹性模量当前按 Pa 录入；210 GPa 请填写 210000000000。"
                     color: "#64748B"
                     wrapMode: Text.WordWrap
                     font.pixelSize: 12
@@ -1876,6 +2187,12 @@ ApplicationWindow {
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
+        background: Rectangle {
+            radius: 18
+            color: root.uiCardColor
+            border.color: root.uiBorderColor
+            border.width: 1.0
+        }
         onOpened: {
             root.resultOverlayMode = "deformed"
             root.repaintViewport()
@@ -1904,9 +2221,10 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    radius: 12
+                    radius: root.uiCardRadius
                     color: root.uiPanelSoftColor
                     border.color: root.uiBorderColor
+                    clip: true
 
                     Image {
                         anchors.fill: parent
@@ -1918,31 +2236,43 @@ ApplicationWindow {
                 }
 
                 Rectangle {
-                    Layout.preferredWidth: 240
+                    Layout.preferredWidth: 250
                     Layout.fillHeight: true
-                    radius: 12
+                    radius: root.uiCardRadius
                     color: root.uiCardColor
                     border.color: root.uiBorderColor
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 14
                         spacing: 10
 
-                        Label { text: "显示控制"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        WorkbenchCheckBox { id: deformationShowMeshBox; text: "显示网格线"; checked: true }
-                        WorkbenchCheckBox { id: deformationShowDeformedBox; text: "显示变形后轮廓"; checked: true }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Max |u| = " + root.formatScientific(((root.deformationPlotData().summary || {}).max_displacement || 0.0))
-                            color: "#334155"
-                            wrapMode: Text.WordWrap
+                        DialogSectionTitle { text: "显示控制" }
+                        DialogCheckOption {
+                            id: deformationShowMeshBox
+                            text: "显示网格线"
+                            helperText: "叠加原始单元边界"
+                            checked: false
+                        }
+                        DialogCheckOption {
+                            id: deformationShowDeformedBox
+                            text: "显示变形后轮廓"
+                            helperText: "显示放大后的变形外形"
+                            checked: false
+                        }
+                        DialogMetricRow {
+                            label: "Max |u|"
+                            value: root.formatDisplacementWithUnit(((root.deformationPlotData().summary || {}).max_displacement || 0.0))
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: "缓存目录：\n" + bridge.contourImageCacheDir
+                            Layout.preferredHeight: 40
+                            text: bridge.contourImageCacheDir === "" ? "图片缓存：暂无" : "图片缓存：已生成"
                             color: "#64748B"
+                            font.pixelSize: 11
                             wrapMode: Text.WordWrap
+                            elide: Text.ElideRight
                         }
                         Item { Layout.fillHeight: true }
                     }
@@ -1963,6 +2293,12 @@ ApplicationWindow {
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
+        background: Rectangle {
+            radius: 18
+            color: root.uiCardColor
+            border.color: root.uiBorderColor
+            border.width: 1.0
+        }
         onOpened: {}
 
         ColumnLayout {
@@ -1971,7 +2307,7 @@ ApplicationWindow {
             spacing: 10
 
             Label {
-                text: "位移幅值 |u| 彩色渐变云图"
+                text: "位移幅值 |u| 彩色渐变云图（" + root.displacementUnitLabel() + "）"
                 color: "#334155"
                 font.pixelSize: 13
             }
@@ -1984,9 +2320,10 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    radius: 12
+                    radius: root.uiCardRadius
                     color: root.uiPanelSoftColor
                     border.color: root.uiBorderColor
+                    clip: true
 
                     Image {
                         anchors.fill: parent
@@ -1998,47 +2335,44 @@ ApplicationWindow {
                 }
 
                 Rectangle {
-                    Layout.preferredWidth: 270
+                    Layout.preferredWidth: 280
                     Layout.fillHeight: true
-                    radius: 12
+                    radius: root.uiCardRadius
                     color: root.uiCardColor
                     border.color: root.uiBorderColor
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 14
                         spacing: 10
 
-                        Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
-                        WorkbenchCheckBox {
+                        DialogSectionTitle { text: "结果显示" }
+                        DialogCheckOption {
                             id: displacementShowMeshBox
                             text: "显示网格线"
-                            checked: true
+                            helperText: "叠加网格边线"
+                            checked: false
                         }
-                        WorkbenchCheckBox {
+                        DialogCheckOption {
                             id: displacementShowDeformedBox
                             text: "显示变形后轮廓"
-                            checked: true
+                            helperText: "按当前显示选项切换缓存图像"
+                            checked: false
                         }
-                        RowLayout {
+                        WorkbenchButton {
                             Layout.fillWidth: true
-                            spacing: 8
-                            WorkbenchButton {
-                                text: "导出位移云图数据"
-                                onClicked: bridge.exportDisplacementContourData("outputs/latest")
-                            }
+                            text: "导出位移云图数据"
+                            visualRole: "neutral"
+                            onClicked: bridge.exportDisplacementContourData("outputs/latest")
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Min = " + root.formatScientific(Number((root.displacementContourData().min_displacement || 0.0)))
-                            color: "#334155"
-                            wrapMode: Text.WordWrap
+                        DialogMetricRow {
+                            label: "Min (" + root.displacementUnitLabel() + ")"
+                            value: root.formatDisplacement(Number((root.displacementContourData().min_displacement || 0.0)))
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Max = " + root.formatScientific(Number((root.displacementContourData().max_displacement || 0.0)))
-                            color: "#334155"
-                            wrapMode: Text.WordWrap
+                        DialogMetricRow {
+                            label: "Max (" + root.displacementUnitLabel() + ")"
+                            value: root.formatDisplacement(Number((root.displacementContourData().max_displacement || 0.0)))
                         }
                         Item { Layout.fillHeight: true }
                     }
@@ -2058,13 +2392,14 @@ ApplicationWindow {
                     spacing: 10
                     Label {
                         Layout.fillWidth: true
-                        text: "位移云图 | Min = " + root.formatScientific(Number((root.displacementContourData().min_displacement || 0.0)))
-                              + " | Max = " + root.formatScientific(Number((root.displacementContourData().max_displacement || 0.0)))
+                        text: "位移云图 | Min = " + root.formatDisplacementWithUnit(Number((root.displacementContourData().min_displacement || 0.0)))
+                              + " | Max = " + root.formatDisplacementWithUnit(Number((root.displacementContourData().max_displacement || 0.0)))
+                        textFormat: Text.RichText
                         color: "#475569"
                         elide: Text.ElideRight
                     }
                     Label {
-                        text: "缓存切换"
+                        text: "单位：" + root.displacementUnitLabel()
                         color: "#64748B"
                     }
                 }
@@ -2084,6 +2419,12 @@ ApplicationWindow {
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
         standardButtons: Dialog.Ok
+        background: Rectangle {
+            radius: 18
+            color: root.uiCardColor
+            border.color: root.uiBorderColor
+            border.width: 1.0
+        }
         onOpened: {}
 
         ColumnLayout {
@@ -2092,7 +2433,7 @@ ApplicationWindow {
             spacing: 10
 
             Label {
-                text: "Von Mises 应力云图"
+                text: "Von Mises 应力云图（kPa）"
                 color: "#334155"
                 font.pixelSize: 13
             }
@@ -2105,9 +2446,10 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    radius: 12
+                    radius: root.uiCardRadius
                     color: root.uiPanelSoftColor
                     border.color: root.uiBorderColor
+                    clip: true
 
                     Image {
                         anchors.fill: parent
@@ -2119,56 +2461,54 @@ ApplicationWindow {
                 }
 
                 Rectangle {
-                    Layout.preferredWidth: 290
+                    Layout.preferredWidth: 300
                     Layout.fillHeight: true
-                    radius: 12
+                    radius: root.uiCardRadius
                     color: root.uiCardColor
                     border.color: root.uiBorderColor
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 14
                         spacing: 10
 
-                        Label { text: "结果显示"; color: "#0F172A"; font.pixelSize: 14; font.bold: true }
+                        DialogSectionTitle { text: "结果显示" }
                         WorkbenchComboBox {
                             id: stressContourModeCombo
                             Layout.fillWidth: true
                             model: ["精确模式（单元常值）", "平滑模式（节点平均）"]
+                            currentIndex: 1
                         }
-                        WorkbenchCheckBox {
+                        DialogCheckOption {
                             id: stressShowMeshBox
                             text: "显示网格线"
-                            checked: true
+                            helperText: "叠加单元边界"
+                            checked: false
                         }
-                        WorkbenchCheckBox {
+                        DialogCheckOption {
                             id: stressShowDeformedBox
                             text: "显示变形后轮廓"
-                            checked: true
+                            helperText: "按当前模式切换缓存图像"
+                            checked: false
                         }
-                        RowLayout {
+                        WorkbenchButton {
                             Layout.fillWidth: true
-                            spacing: 8
-                            WorkbenchButton {
-                                text: "导出应力云图数据"
-                                onClicked: bridge.exportStressContourData("outputs/latest")
-                            }
+                            text: "导出应力云图数据"
+                            visualRole: "neutral"
+                            onClicked: bridge.exportStressContourData("outputs/latest")
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Min = " + root.formatScientific(stressContourModeCombo.currentIndex === 0
+                        DialogMetricRow {
+                            label: "Min (kPa)"
+                            value: root.formatStressKPa(stressContourModeCombo.currentIndex === 0
                                   ? Number((root.stressContourExactData().min_von_mises || 0.0))
                                   : Number((root.stressContourSmoothData().min_von_mises || 0.0)))
-                            color: "#334155"
-                            wrapMode: Text.WordWrap
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Max = " + root.formatScientific(stressContourModeCombo.currentIndex === 0
+                        DialogMetricRow {
+                            label: "Max (kPa)"
+                            value: root.formatStressKPa(stressContourModeCombo.currentIndex === 0
                                   ? Number((root.stressContourExactData().max_von_mises || 0.0))
                                   : Number((root.stressContourSmoothData().max_von_mises || 0.0)))
-                            color: "#334155"
-                            wrapMode: Text.WordWrap
                         }
                         Item { Layout.fillHeight: true }
                     }
@@ -2189,13 +2529,14 @@ ApplicationWindow {
                     Label {
                         Layout.fillWidth: true
                         text: stressContourModeCombo.currentIndex === 0
-                              ? "应力云图 | 精确模式（单元常值） | Max = " + root.formatScientific(Number((root.stressContourExactData().max_von_mises || 0.0)))
-                              : "应力云图 | 平滑模式（节点平均） | Max = " + root.formatScientific(Number((root.stressContourSmoothData().max_von_mises || 0.0)))
+                              ? "应力云图 | 精确模式（单元常值） | Max = " + root.formatStressKPa(Number((root.stressContourExactData().max_von_mises || 0.0)))
+                              : "应力云图 | 平滑模式（节点平均） | Max = " + root.formatStressKPa(Number((root.stressContourSmoothData().max_von_mises || 0.0)))
+                        textFormat: Text.RichText
                         color: "#475569"
                         elide: Text.ElideRight
                     }
                     Label {
-                        text: "单位：Pa"
+                        text: "单位：kPa"
                         color: "#64748B"
                     }
                 }
@@ -2518,6 +2859,28 @@ ApplicationWindow {
                                     text: "缩小"
                                     onClicked: root.zoomViewportBy(1.0 / 1.15)
                                 }
+                                WorkbenchButton {
+                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                    leftPadding: root.uiButtonHPadding
+                                    rightPadding: root.uiButtonHPadding
+                                    font.pixelSize: 12
+                                    text: "移动视图"
+                                    visualRole: root.viewportPanMode ? "strongPrimary" : "neutral"
+                                    onClicked: root.setModelingTool("移动视图")
+                                }
+                                WorkbenchButton {
+                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                    leftPadding: root.uiButtonHPadding
+                                    rightPadding: root.uiButtonHPadding
+                                    font.pixelSize: 12
+                                    text: "视图复位"
+                                    onClicked: {
+                                        root.viewportPanMode = false
+                                        root.isPanningViewport = false
+                                        root.isPanning = false
+                                        root.resetViewportTransform()
+                                    }
+                                }
                             }
                         }
 
@@ -2548,6 +2911,14 @@ ApplicationWindow {
                                 cursorShape: root.viewportPanMode
                                              ? (root.isPanningViewport ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
                                              : Qt.ArrowCursor
+
+                                onWheel: function(wheel) {
+                                    if (root.viewportPanMode && (wheel.modifiers & Qt.ControlModifier)) {
+                                        var factor = wheel.angleDelta.y > 0 ? 1.10 : (1.0 / 1.10)
+                                        root.zoomViewportAt(factor, wheel.x, wheel.y)
+                                        wheel.accepted = true
+                                    }
+                                }
 
                                 onPressed: function(mouse) {
                                     root.lastMouseX = mouse.x
@@ -2702,7 +3073,7 @@ ApplicationWindow {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.margins: 14
-                            spacing: 12
+                            spacing: 14
 
                             Rectangle {
                                 visible: root.currentMode === "建模与材料"
@@ -2715,55 +3086,59 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: modelingColumn
                                     anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 8
+                                    anchors.margins: 12
+                                    spacing: 12
 
                                     Label { text: "建模工具"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
 
-                                    Flow {
+                                    ColumnLayout {
                                         Layout.fillWidth: true
-                                        spacing: 6
-                                        Repeater {
-                                            model: ["选择", "添加节点", "连接边", "移动节点", "删除"]
-                                            delegate: WorkbenchButton {
-                                                width: 86
-                                                height: root.uiButtonCompactHeight
-                                                leftPadding: root.uiButtonHPadding
-                                                rightPadding: root.uiButtonHPadding
-                                                font.pixelSize: 12
-                                                text: modelData
-                                                onClicked: root.setModelingTool(modelData)
+                                        spacing: 10
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+                                            Repeater {
+                                                model: ["选择", "删除"]
+                                                delegate: WorkbenchButton {
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                                    leftPadding: root.uiButtonHPadding
+                                                    rightPadding: root.uiButtonHPadding
+                                                    font.pixelSize: 12
+                                                    text: modelData
+                                                    onClicked: root.setModelingTool(modelData)
+                                                }
                                             }
                                         }
-                                        WorkbenchButton {
-                                            width: 92
-                                            height: root.uiButtonCompactHeight
-                                            leftPadding: root.uiButtonHPadding
-                                            rightPadding: root.uiButtonHPadding
-                                            font.pixelSize: 12
-                                            text: "移动视图"
-                                            onClicked: root.setModelingTool("移动视图")
-                                        }
-                                        WorkbenchButton {
-                                            width: 92
-                                            height: root.uiButtonCompactHeight
-                                            leftPadding: root.uiButtonHPadding
-                                            rightPadding: root.uiButtonHPadding
-                                            font.pixelSize: 12
-                                            text: "视图复位"
-                                            onClicked: {
-                                                root.viewportPanMode = false
-                                                root.isPanningViewport = false
-                                                root.isPanning = false
-                                                root.resetViewportTransform()
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+                                            Repeater {
+                                                model: ["添加节点", "移动节点", "连接边"]
+                                                delegate: WorkbenchButton {
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredHeight: root.uiButtonCompactHeight
+                                                    leftPadding: root.uiButtonHPadding
+                                                    rightPadding: root.uiButtonHPadding
+                                                    font.pixelSize: 12
+                                                    text: modelData
+                                                    onClicked: root.setModelingTool(modelData)
+                                                }
                                             }
                                         }
                                     }
 
-                                    FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
-                                    FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        FormField { id: pointXField; Layout.fillWidth: true; label: "点 X"; text: "0.0" }
+                                        FormField { id: pointYField; Layout.fillWidth: true; label: "点 Y"; text: "0.0" }
+                                    }
                                     WorkbenchButton {
                                         Layout.fillWidth: true
+                                        Layout.topMargin: 2
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
                                         rightPadding: root.uiButtonHPadding
@@ -2772,20 +3147,60 @@ ApplicationWindow {
                                         onClicked: bridge.addModelPoint(Number(pointXField.text), Number(pointYField.text))
                                     }
 
-                                    FormField { id: edgeStartField; Layout.fillWidth: true; label: "起点 ID"; text: "p1" }
-                                    FormField { id: edgeEndField; Layout.fillWidth: true; label: "终点 ID"; text: "p2" }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+                                            Label { text: "起点 ID"; color: "#334155"; font.pixelSize: 11 }
+                                            WorkbenchComboBox {
+                                                id: edgeStartCombo
+                                                Layout.fillWidth: true
+                                                model: root.modelPointOptionsFromJson()
+                                                currentIndex: count > 0 ? 0 : -1
+                                                displayText: count > 0 ? currentText : "暂无节点"
+                                            }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+                                            Label { text: "终点 ID"; color: "#334155"; font.pixelSize: 11 }
+                                            WorkbenchComboBox {
+                                                id: edgeEndCombo
+                                                Layout.fillWidth: true
+                                                model: root.modelPointOptionsFromJson()
+                                                currentIndex: count > 1 ? 1 : (count > 0 ? 0 : -1)
+                                                displayText: count > 0 ? currentText : "暂无节点"
+                                            }
+                                        }
+                                    }
                                     WorkbenchButton {
                                         Layout.fillWidth: true
+                                        Layout.topMargin: 2
                                         Layout.preferredHeight: root.uiButtonHeight
                                         leftPadding: root.uiButtonHPadding
                                         rightPadding: root.uiButtonHPadding
                                         font.pixelSize: 12
                                         text: "连接边"
-                                        onClicked: bridge.connectModelEdge(edgeStartField.text, edgeEndField.text)
+                                        onClicked: {
+                                            var startId = root.parsePointIdFromOption(edgeStartCombo.currentText)
+                                            var endId = root.parsePointIdFromOption(edgeEndCombo.currentText)
+                                            if (startId === "" || endId === "") {
+                                                viewportHint = "请先创建至少两个节点，并在下拉框中选择起点和终点。"
+                                                return
+                                            }
+                                            if (startId === endId) {
+                                                viewportHint = "起点和终点不能相同。"
+                                                return
+                                            }
+                                            bridge.connectModelEdge(startId, endId)
+                                        }
                                     }
 
                                     RowLayout {
                                         Layout.fillWidth: true
+                                        Layout.topMargin: 2
                                         spacing: 8
                                         WorkbenchButton {
                                             Layout.fillWidth: true
@@ -2819,78 +3234,100 @@ ApplicationWindow {
 
                                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#D3DCE8" }
 
-                                    Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
-                                    Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
-                                    WorkbenchComboBox {
-                                        id: faceTargetCombo
+                                    Rectangle {
                                         Layout.fillWidth: true
-                                        model: root.faceOptionsFromJson()
-                                        currentIndex: root.faceOptionIndexById(bridge.selectedFaceId)
-                                        displayText: count > 0 ? currentText : "请先生成闭合面"
-                                        onActivated: function(index) {
-                                            var faceId = root.parseFaceIdFromOption(faceTargetCombo.textAt(index))
-                                            if (faceId !== "") {
-                                                bridge.selectGeometryFace(faceId)
-                                                root.repaintViewport()
-                                            }
-                                        }
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-                                        Label { text: "当前闭合面"; color: "#334155"; font.pixelSize: 12 }
-                                        Label {
-                                            Layout.fillWidth: true
-                                            text: root.currentFaceDisplayText()
-                                            color: "#0F172A"
-                                            font.pixelSize: 12
-                                            horizontalAlignment: Text.AlignRight
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                    WorkbenchComboBox { id: materialAssignCombo; Layout.fillWidth: true; model: bridge.materialOptions }
-                                    FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
+                                        implicitHeight: materialAssignColumn.implicitHeight + 26
+                                        radius: root.uiCardRadius
+                                        color: "#F9FBFF"
+                                        border.color: root.uiPrimaryBorder
+                                        border.width: 1.0
+                                        clip: true
 
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-                                        WorkbenchButton {
-                                            text: "应用到选中闭合面"
-                                            onClicked: {
-                                                var faceId = root.parseFaceIdFromOption(faceTargetCombo.currentText)
-                                                if (faceId === "") {
-                                                    viewportHint = "请先生成并选择闭合面。"
-                                                    return
+                                        ColumnLayout {
+                                            id: materialAssignColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 13
+                                            spacing: 11
+
+                                            Label { text: "材料分配"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
+                                            Label { text: "目标闭合面"; color: "#334155"; font.pixelSize: 12 }
+                                            WorkbenchComboBox {
+                                                id: faceTargetCombo
+                                                Layout.fillWidth: true
+                                                model: root.faceOptionsFromJson()
+                                                currentIndex: root.faceOptionIndexById(bridge.selectedFaceId)
+                                                displayText: count > 0 ? currentText : "请先生成闭合面"
+                                                onActivated: function(index) {
+                                                    var faceId = root.parseFaceIdFromOption(faceTargetCombo.textAt(index))
+                                                    if (faceId !== "") {
+                                                        bridge.selectGeometryFace(faceId)
+                                                        root.repaintViewport()
+                                                    }
                                                 }
-                                                bridge.selectGeometryFace(faceId)
-                                                bridge.assignMaterialToSelectedFace(
-                                                    root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                    Number(thicknessAssignField.text)
-                                                )
-                                                root.repaintViewport()
                                             }
-                                        }
-                                        WorkbenchButton {
-                                            text: "应用到全部闭合面"
-                                            onClicked: bridge.assignMaterialToAllFaces(
-                                                root.parseMaterialIdFromOption(materialAssignCombo.currentText),
-                                                Number(thicknessAssignField.text)
-                                            )
+                                            Label { text: "选中材料"; color: "#334155"; font.pixelSize: 12 }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+                                                WorkbenchComboBox {
+                                                    id: materialAssignCombo
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredWidth: 1
+                                                    model: bridge.materialOptions
+                                                }
+                                                WorkbenchButton {
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredWidth: 1
+                                                    Layout.preferredHeight: root.uiButtonHeight
+                                                    leftPadding: root.uiButtonHPadding
+                                                    rightPadding: root.uiButtonHPadding
+                                                    font.pixelSize: 12
+                                                    text: "打开材料编辑器"
+                                                    onClicked: materialEditorDialog.open()
+                                                }
+                                            }
+                                            FormField { id: thicknessAssignField; Layout.fillWidth: true; label: "厚度"; text: String(bridge.activePartThickness) }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                Layout.topMargin: 3
+                                                spacing: 8
+                                                WorkbenchButton {
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredHeight: 42
+                                                    visualRole: "strongPrimary"
+                                                    text: "应用到选中闭合面"
+                                                    onClicked: {
+                                                        var faceId = root.parseFaceIdFromOption(faceTargetCombo.currentText)
+                                                        if (faceId === "") {
+                                                            viewportHint = "请先生成并选择闭合面。"
+                                                            return
+                                                        }
+                                                        bridge.selectGeometryFace(faceId)
+                                                        bridge.assignMaterialToSelectedFace(
+                                                            root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                            Number(thicknessAssignField.text)
+                                                        )
+                                                        root.repaintViewport()
+                                                    }
+                                                }
+                                                WorkbenchButton {
+                                                    Layout.fillWidth: true
+                                                    Layout.preferredHeight: 42
+                                                    visualRole: "strongPrimary"
+                                                    text: "应用到全部闭合面"
+                                                    onClicked: bridge.assignMaterialToAllFaces(
+                                                        root.parseMaterialIdFromOption(materialAssignCombo.currentText),
+                                                        Number(thicknessAssignField.text)
+                                                    )
+                                                }
+                                            }
+
+                                            Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
+                                            WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
                                         }
                                     }
-
-                                    WorkbenchButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: root.uiButtonHeight
-                                        leftPadding: root.uiButtonHPadding
-                                        rightPadding: root.uiButtonHPadding
-                                        font.pixelSize: 12
-                                        text: "打开材料编辑器"
-                                        onClicked: materialEditorDialog.open()
-                                    }
-
-                                    Label { text: "闭合面材料列表"; color: "#334155"; font.pixelSize: 12 }
-                                    WorkbenchTextArea { Layout.fillWidth: true; Layout.preferredHeight: 84; readOnly: true; text: bridge.faceMaterialRowsPreview }
                                 }
                             }
 
@@ -2905,15 +3342,16 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: meshColumn
                                     anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 8
+                                    anchors.margins: 12
+                                    spacing: 12
 
                                     Label { text: "网格生成"; color: "#0F172A"; font.pixelSize: 15; font.bold: true }
                                     Label { text: "唯一正式网格器：Gmsh CST 三角网格"; color: "#334155"; wrapMode: Text.WordWrap }
-                                    FormField { id: meshTargetSizeField; Layout.fillWidth: true; label: "target_size"; text: String(bridge.meshTargetSize) }
+                                    FormField { id: meshTargetSizeField; Layout.fillWidth: true; label: "target_size"; text: String(bridge.meshTargetSize > 0 ? bridge.meshTargetSize : 0.8) }
                                     FormField { id: meshMinAngleField; Layout.fillWidth: true; label: "min_angle"; text: String(bridge.meshMinAngle) }
                                     RowLayout {
                                         Layout.fillWidth: true
+                                        Layout.topMargin: 2
                                         spacing: 8
                                         WorkbenchButton {
                                             Layout.fillWidth: true

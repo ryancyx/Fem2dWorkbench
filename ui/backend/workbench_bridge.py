@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+import math
+import shutil
 from pathlib import Path
 import sys
 import uuid
@@ -166,6 +168,48 @@ from services.sketch_geometry_service import (
     move_sketch_point,
 )
 from ui.backend.workbench_tasks import FunctionWorker
+
+
+_SUPERSCRIPT_DIGITS = str.maketrans({
+    "-": "⁻",
+    "+": "⁺",
+    "0": "⁰",
+    "1": "¹",
+    "2": "²",
+    "3": "³",
+    "4": "⁴",
+    "5": "⁵",
+    "6": "⁶",
+    "7": "⁷",
+    "8": "⁸",
+    "9": "⁹",
+})
+
+
+def _superscript_exponent(exponent: int) -> str:
+    return str(int(exponent)).translate(_SUPERSCRIPT_DIGITS)
+
+
+def _format_power10(value: float, digits: int = 6, unit: str = "") -> str:
+    number = float(value or 0.0)
+    if not math.isfinite(number) or abs(number) < 1.0e-30:
+        return f"0 {unit}".strip()
+    exponent = math.floor(math.log10(abs(number)))
+    mantissa = number / (10.0 ** exponent)
+    mantissa_text = f"{mantissa:.{digits}f}".rstrip("0").rstrip(".")
+    return f"{mantissa_text}×10{_superscript_exponent(exponent)} {unit}".strip()
+
+
+def _format_plain_or_power10(value: float, digits: int = 6, unit: str = "") -> str:
+    number = float(value or 0.0)
+    if not math.isfinite(number) or abs(number) < 1.0e-30:
+        return f"0 {unit}".strip()
+    abs_value = abs(number)
+    if 1.0e-3 <= abs_value < 1.0e6:
+        decimal_count = 2 if abs_value >= 1000.0 else (3 if abs_value >= 1.0 else digits)
+        plain_text = f"{number:.{decimal_count}f}".rstrip("0").rstrip(".")
+        return f"{plain_text} {unit}".strip()
+    return _format_power10(number, digits=digits, unit=unit)
 
 
 class WorkbenchBridge(QObject):
@@ -486,7 +530,7 @@ class WorkbenchBridge(QObject):
     def maxDisplacement(self) -> str:
         if self.summary is None:
             return ""
-        return f"{self.summary.max_displacement:.6e}"
+        return _format_power10(self.summary.max_displacement, unit="m")
 
     @Property(str, notify=resultChanged)
     def maxDisplacementNodeId(self) -> str:
@@ -498,7 +542,7 @@ class WorkbenchBridge(QObject):
     def maxVonMises(self) -> str:
         if self.summary is None:
             return ""
-        return f"{self.summary.max_von_mises:.6e}"
+        return _format_power10(self.summary.max_von_mises / 1000.0, unit="kPa")
 
     @Property(str, notify=resultChanged)
     def maxVonMisesElementId(self) -> str:
@@ -517,8 +561,12 @@ class WorkbenchBridge(QObject):
         lines = ["node_id        x        y           ux           uy        |u|"]
         for row in self.node_rows[:12]:
             lines.append(
-                f"{row.node_id:7d} {row.x:8.4g} {row.y:8.4g} "
-                f"{row.ux:12.5e} {row.uy:12.5e} {row.u_magnitude:12.5e}"
+                f"{row.node_id:7d} "
+                f"{_format_plain_or_power10(row.x, digits=4):>12s} "
+                f"{_format_plain_or_power10(row.y, digits=4):>12s} "
+                f"{_format_power10(row.ux, digits=5):>16s} "
+                f"{_format_power10(row.uy, digits=5):>16s} "
+                f"{_format_power10(row.u_magnitude, digits=5):>16s}"
             )
         return "\n".join(lines)
 
@@ -526,12 +574,14 @@ class WorkbenchBridge(QObject):
     def elementRowsPreview(self) -> str:
         if not self.element_rows:
             return ""
-        lines = ["element_id   nodes        stress_x      stress_y     von_mises"]
+        lines = ["element_id   nodes        stress_x        stress_y       von_mises"]
         for row in self.element_rows[:12]:
             node_ids = " ".join(str(node_id) for node_id in row.node_ids)
             lines.append(
                 f"{row.element_id:10d} {node_ids:11s} "
-                f"{row.stress_x:12.5e} {row.stress_y:12.5e} {row.von_mises:12.5e}"
+                f"{_format_power10(row.stress_x / 1000.0, digits=5, unit='kPa'):>18s} "
+                f"{_format_power10(row.stress_y / 1000.0, digits=5, unit='kPa'):>18s} "
+                f"{_format_power10(row.von_mises / 1000.0, digits=5, unit='kPa'):>18s}"
             )
         return "\n".join(lines)
 
@@ -2103,11 +2153,11 @@ class WorkbenchBridge(QObject):
             self.result_query_x = x
             self.result_query_y = y
             self.result_query_text = (
-                f"查询点 ({x:.6g}, {y:.6g})\n"
+                f"查询点 ({_format_power10(x, unit='m')}, {_format_power10(y, unit='m')})\n"
                 f"最近节点: {nearest.node_id}\n"
-                f"ux = {nearest.ux:.6e}\n"
-                f"uy = {nearest.uy:.6e}\n"
-                f"|u| = {nearest.u_magnitude:.6e}"
+                f"ux = {_format_power10(nearest.ux, unit='m')}\n"
+                f"uy = {_format_power10(nearest.uy, unit='m')}\n"
+                f"|u| = {_format_power10(nearest.u_magnitude, unit='m')}"
             )
             self.resultChanged.emit()
             self._set_status_text("已更新结果查询")
@@ -2560,6 +2610,181 @@ class WorkbenchBridge(QObject):
             return False
         finally:
             self._finish_busy()
+
+
+    def _load_contour_image_cache_map(self) -> dict[str, dict[str, str]]:
+        if not self.contour_image_cache_valid or self.contour_image_cache_json in ("", "{}"):
+            raise ValueError("没有可导出的云图，请先完成求解并生成云图缓存")
+        image_map = json.loads(self.contour_image_cache_json)
+        if not isinstance(image_map, dict):
+            raise ValueError("云图缓存索引格式无效")
+        return image_map
+
+    def _safe_export_name(self, text: object) -> str:
+        safe = str(text).strip() or "image"
+        for ch in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+            safe = safe.replace(ch, "_")
+        return safe
+
+    def _copy_contour_image_categories(
+        self,
+        *,
+        image_map: dict[str, dict[str, str]],
+        output_path: Path,
+        categories: list[str],
+        use_category_dirs: bool,
+    ) -> tuple[int, int]:
+        category_labels = {
+            "deformation_preview": "deformation",
+            "displacement": "displacement",
+            "stress_exact": "stress_exact",
+            "stress_smooth": "stress_smooth",
+        }
+        copied_count = 0
+        missing_count = 0
+        used_names: set[str] = set()
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        for category in categories:
+            variants = image_map.get(category, {})
+            if not isinstance(variants, dict):
+                continue
+            category_name = category_labels.get(str(category), str(category))
+            target_dir = output_path / category_name if use_category_dirs else output_path
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for variant_key, source_path in variants.items():
+                source = Path(str(source_path))
+                if not source.exists() or not source.is_file():
+                    missing_count += 1
+                    continue
+                safe_variant = self._safe_export_name(variant_key)
+                target_name = f"{category_name}_{safe_variant}.png"
+                if target_name in used_names:
+                    target_name = f"{category_name}_{safe_variant}_{copied_count + 1}.png"
+                used_names.add(target_name)
+                shutil.copy2(source, target_dir / target_name)
+                copied_count += 1
+        return copied_count, missing_count
+
+    @Slot(str, result=bool)
+    def exportDisplacementContourImages(self, output_dir: str = "outputs/latest/displacement_contours") -> bool:
+        try:
+            output_path = Path(str(output_dir)).expanduser()
+            image_map = self._load_contour_image_cache_map()
+            copied_count, missing_count = self._copy_contour_image_categories(
+                image_map=image_map,
+                output_path=output_path,
+                categories=["displacement"],
+                use_category_dirs=False,
+            )
+            if copied_count <= 0:
+                self._set_status_text("导出位移云图失败：没有找到可复制的位移云图图片缓存")
+                return False
+            if missing_count > 0:
+                self._set_status_text(
+                    f"位移云图已导出到 {output_path}，共 {copied_count} 张；另有 {missing_count} 张缓存缺失，请重新求解后再试"
+                )
+            else:
+                self._set_status_text(f"位移云图已导出到 {output_path}，共 {copied_count} 张")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出位移云图失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def exportStressContourImages(self, output_dir: str = "outputs/latest/stress_contours") -> bool:
+        try:
+            output_path = Path(str(output_dir)).expanduser()
+            image_map = self._load_contour_image_cache_map()
+            copied_count, missing_count = self._copy_contour_image_categories(
+                image_map=image_map,
+                output_path=output_path,
+                categories=["stress_exact", "stress_smooth"],
+                use_category_dirs=True,
+            )
+            if copied_count <= 0:
+                self._set_status_text("导出应力云图失败：没有找到可复制的应力云图图片缓存")
+                return False
+            if missing_count > 0:
+                self._set_status_text(
+                    f"应力云图已导出到 {output_path}，共 {copied_count} 张；另有 {missing_count} 张缓存缺失，请重新求解后再试"
+                )
+            else:
+                self._set_status_text(f"应力云图已导出到 {output_path}，共 {copied_count} 张")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出应力云图失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def exportContourImages(self, output_dir: str = "outputs/latest/contour_images") -> bool:
+        """Export all pre-rendered contour PNG images to a user selected directory."""
+        try:
+            output_path = Path(str(output_dir)).expanduser()
+            image_map = self._load_contour_image_cache_map()
+            copied_count, missing_count = self._copy_contour_image_categories(
+                image_map=image_map,
+                output_path=output_path,
+                categories=["deformation_preview", "displacement", "stress_exact", "stress_smooth"],
+                use_category_dirs=True,
+            )
+            if copied_count <= 0:
+                self._set_status_text("导出云图失败：没有找到可复制的云图图片缓存")
+                return False
+            if missing_count > 0:
+                self._set_status_text(
+                    f"云图已导出到 {output_path}，共 {copied_count} 张；另有 {missing_count} 张缓存缺失，请重新求解后再试"
+                )
+            else:
+                self._set_status_text(f"云图已导出到 {output_path}，共 {copied_count} 张")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出云图失败: {exc}")
+            return False
+
+    @Slot(str, result=bool)
+    def exportAllResults(self, output_dir: str = "outputs/latest/full_results") -> bool:
+        if self.current_solution is None:
+            self._set_status_text("没有可导出的结果")
+            return False
+
+        try:
+            output_path = Path(str(output_dir)).expanduser()
+            output_path.mkdir(parents=True, exist_ok=True)
+            export_node_displacements_csv(
+                self.current_solution,
+                output_path / "node_displacements.csv",
+            )
+            export_element_results_csv(
+                self.current_solution,
+                output_path / "element_results.csv",
+            )
+            export_result_summary_txt(
+                self.current_solution,
+                output_path / "summary.txt",
+            )
+
+            image_map = self._load_contour_image_cache_map()
+            image_output_path = output_path / "contour_images"
+            copied_count, missing_count = self._copy_contour_image_categories(
+                image_map=image_map,
+                output_path=image_output_path,
+                categories=["displacement", "stress_exact", "stress_smooth"],
+                use_category_dirs=True,
+            )
+            if copied_count <= 0:
+                self._set_status_text("节点和单元结果已导出，但没有找到可复制的云图图片缓存")
+                return False
+            if missing_count > 0:
+                self._set_status_text(
+                    f"全部结果已导出到 {output_path}；云图 {copied_count} 张，另有 {missing_count} 张缓存缺失，请重新求解后再试"
+                )
+            else:
+                self._set_status_text(f"全部结果已导出到 {output_path}；云图 {copied_count} 张")
+            return True
+        except Exception as exc:
+            self._set_status_text(f"导出全部结果失败: {exc}")
+            return False
 
     @Slot(str, result=bool)
     def exportResults(self, output_dir: str = "outputs/latest") -> bool:
