@@ -12,7 +12,7 @@
 
 > 推荐普通用户使用绿色版，无需安装 Python 或配置运行环境。
 
-[⬇️ 下载 Fem2dWorkbench v0.2.6 Windows 绿色版](https://github.com/ryancyx/Fem2dWorkbench/releases/download/v0.2.6/Fem2dWorkbench_v0.2.6.zip)
+[⬇️ 下载 Fem2dWorkbench v0.2.6 Windows 绿色版](https://github.com/ryancyx/Fem2dWorkbench/releases/download/v0.2.6/Fem2dWorkbench_v0.2.6_green.zip)
 
 使用方法：
 
