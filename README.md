@@ -289,7 +289,7 @@ python main.py
 
 ## 👤 开发者
 
-项目开发者：Ryan Cheung @Ryancyx
+项目开发者：Ryan Cheung @ryancyx
 
 ---
 
