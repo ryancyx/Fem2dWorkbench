@@ -42,8 +42,6 @@ Fem2dWorkbench 不仅仅是一个有限元求解脚本，也是一个具有完�
 
 ## 🖼️ 软件截图
 
-> 以下图片路径为示例，可根据实际截图文件调整。
-
 ### 主界面
 
 ![主界面](docs/images/main_view.png)
@@ -113,6 +111,7 @@ Fem2dWorkbench 不仅仅是一个有限元求解脚本，也是一个具有完�
 | 桌面界面  | PySide6 + QML           |
 | 数值计算  | NumPy + SciPy           |
 | 云图绘制  | Matplotlib              |
+|  网格器   | Gmsh                    |
 | 有限元模型 | 二维 CST 三角形单元            |
 | 测试工具  | pytest                  |
 | 打包工具  | PyInstaller             |
@@ -144,9 +143,9 @@ Fem2dWorkbench/
 
 ## ⚡ 从源码运行
 
-适合开发者使用。
+本教程面向开发者。
 
-首先克隆项目：
+克隆项目：
 
 ```bash
 git clone https://github.com/ryancyx/Fem2dWorkbench.git
@@ -176,7 +175,7 @@ python main.py
 
 ## 📌 基本使用流程
 
-软件推荐按以下流程使用：
+建议按以下流程使用：
 
 ```text
 建模与材料 → 网格生成 → 约束与载荷 → 求解结果
@@ -289,7 +288,7 @@ python main.py
 
 ## 👤 开发相关
 
-项目开发者：Developed by Ryan Cheung @ryancyx | Supervised by Professor Wang Meng
+开发者：Developed by Ryan Cheung @ryancyx | Supervised by Professor Wang Meng
 项目来源：四川大学力学系计算力学课程 
 
 ---
