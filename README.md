@@ -10,13 +10,13 @@
 
 ### Windows 绿色版
 
-> 推荐普通用户使用绿色版，无需安装 Python 或配置运行环境。
+> 推荐普通用户使用绿色版，无需配置运行环境，开箱即用。
 
 [⬇️ 下载 Fem2dWorkbench v0.2.6 Windows 绿色版](https://github.com/ryancyx/Fem2dWorkbench/releases/download/v0.2.6/Fem2dWorkbench_v0.2.6_green.zip)
 
 使用方法：
 
-1. 下载 `Fem2dWorkbench_v0.2.6.zip`
+1. 下载 `Fem2dWorkbench_v0.2.6_green.zip`
 2. 解压到任意文件夹
 3. 进入解压后的目录
 4. 双击运行 `Fem2dWorkbench.exe`
@@ -25,7 +25,7 @@
 
 ## 🎯 项目定位
 
-Fem2dWorkbench 不是单纯的有限元求解脚本，而是一个具有完整前处理、求解和后处理流程的桌面端有限元工作台软件。
+Fem2dWorkbench 不仅仅是一个有限元求解脚本，也是一个具有完整前处理、求解和后处理流程的桌面端有限元工作台软件。
 
 软件当前重点支持：
 
@@ -287,9 +287,10 @@ python main.py
 
 ---
 
-## 👤 开发者
+## 👤 开发相关
 
-项目开发者：Ryan Cheung @ryancyx
+项目开发者：Developed by Ryan Cheung @ryancyx | Supervised by Professor Wang Meng
+项目来源：四川大学力学系计算力学课程 
 
 ---
 
