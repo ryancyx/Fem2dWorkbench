@@ -288,8 +288,8 @@ python main.py
 
 ## 👤 开发相关
 
-开发者：Developed by Ryan Cheung @ryancyx | Supervised by Professor Wang Meng
-项目来源：四川大学力学系计算力学课程 
+* 开发者：Developed by Ryan Cheung @ryancyx | Supervised by Professor Wang Meng
+* 项目来源：四川大学力学系计算力学课程 
 
 ---
 
