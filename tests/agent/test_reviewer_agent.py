@@ -7,7 +7,7 @@ import pytest
 from agent.execution_result import ExecutionResult
 from agent.geometry_agent import GeometryAgent
 from agent.llm_client import StructuredOutputError
-from agent.reviewer_agent import REVIEW_RESULT_SCHEMA, ReviewerAgent
+from agent.reviewer_agent import REVIEWER_SYSTEM_PROMPT, REVIEW_RESULT_SCHEMA, ReviewerAgent
 from agent.simulation_plan import SimulationPlan
 from core.engineering.load_definition import LoadDefinition
 
@@ -205,6 +205,42 @@ def test_reviewer_case_5_normal_model_proposes_no_repair(
     assert result.has_problem is False
     assert result.proposals == ()
     assert empty_project.to_dict() == snapshot
+
+
+def test_reviewer_distinguishes_plane_mode_from_requested_strain_result(
+    empty_project,
+    valid_plan,
+) -> None:
+    from conftest import FakeLLMClient
+
+    data = valid_plan.to_dict()
+    data["material"]["plane_mode"] = "stress"
+    data["requestedResult"] = "strain"
+    plan = SimulationPlan.from_dict(data)
+    response = {
+        "hasProblem": False,
+        "diagnosis": "Plane stress analysis can validly output strain results.",
+        "evidence": [
+            "material.plane_mode is stress.",
+            "requestedResult independently requests strain visualization.",
+        ],
+        "proposals": [],
+    }
+    llm = FakeLLMClient(response)
+
+    result = ReviewerAgent(llm).review(
+        plan,
+        empty_project,
+        ExecutionResult.succeeded("SOLVE", {"result": "available"}),
+    )
+
+    assert not result.has_problem
+    assert result.proposals == ()
+    context = json.loads(llm.requests[0][1])
+    assert context["simulationPlan"]["material"]["plane_mode"] == "stress"
+    assert context["simulationPlan"]["requestedResult"] == "strain"
+    assert 'plane_mode="strain"' in REVIEWER_SYSTEM_PROMPT
+    assert 'requestedResult="strain"' in REVIEWER_SYSTEM_PROMPT
 
 
 def test_reviewer_rejects_non_executable_or_internal_id_proposals(

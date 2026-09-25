@@ -19,7 +19,22 @@ natural-language variants such as "left edge" or "bottom-left corner".
 Point loads are [Fx, Fy]; edge loads are [qx, qy]. A null displacement component means
 that direction is unconstrained. Material thickness and plane_mode are mandatory: use
 explicit user values when supplied, otherwise inherit the defaults supplied in project
-context. Return data only through the requested structured-output schema."""
+context. Fem2dWorkbench Agent 1.0 can execute only plane stress. If the user explicitly
+requests plane strain, preserve that intent as plane_mode="strain"; never silently change
+it to plane stress. The Agent capability contract will stop before engineering execution
+and ask the user whether to revise the plan. The requestedResult field is independent:
+requestedResult="strain" means strain visualization/output and is valid with
+plane_mode="stress". Return data only through the requested structured-output schema."""
+
+
+PLANE_STRAIN_UNSUPPORTED_MESSAGE = (
+    "当前 Fem2dWorkbench Agent 1.0 后端仅支持平面应力（plane stress），"
+    "暂不支持平面应变（plane strain）。如需继续，请确认是否改用 plane stress。"
+)
+
+
+class UnsupportedCapabilityError(ValueError):
+    """The plan is valid, but its requested analysis is outside Agent 1.0."""
 
 
 SIMULATION_PLAN_SCHEMA: dict[str, Any] = {
@@ -131,8 +146,15 @@ SIMULATION_PLAN_SCHEMA: dict[str, Any] = {
 class ArchitectAgent:
     def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
+        self._pending_unsupported_plan: SimulationPlan | None = None
 
     def create_plan(self, user_input: str, project: EngineeringProject) -> SimulationPlan:
+        if self._pending_unsupported_plan is not None:
+            return self.revise_plan(
+                user_input,
+                self._pending_unsupported_plan,
+                project,
+            )
         content = {
             "mode": "create",
             "userInput": str(user_input),
@@ -146,13 +168,14 @@ class ArchitectAgent:
         current_plan: SimulationPlan,
         project: EngineeringProject,
     ) -> SimulationPlan:
+        base_plan = self._pending_unsupported_plan or current_plan
         content = {
             "mode": "revise",
             "userInput": str(user_input),
-            "currentPlan": current_plan.to_dict(),
+            "currentPlan": base_plan.to_dict(),
             "projectContext": self._project_context(project),
         }
-        return self._request_plan(content, expected_version=current_plan.version + 1)
+        return self._request_plan(content, expected_version=base_plan.version + 1)
 
     def _request_plan(self, content: dict[str, Any], expected_version: int) -> SimulationPlan:
         try:
@@ -168,9 +191,21 @@ class ArchitectAgent:
         response = dict(response)
         response["version"] = expected_version
         try:
-            return SimulationPlan.from_dict(response)
+            plan = SimulationPlan.from_dict(response)
         except (KeyError, TypeError, ValueError) as exc:
             raise StructuredOutputError(f"Invalid Architect structured output: {exc}") from exc
+        try:
+            self._validate_capabilities(plan)
+        except UnsupportedCapabilityError:
+            self._pending_unsupported_plan = plan
+            raise
+        self._pending_unsupported_plan = None
+        return plan
+
+    @staticmethod
+    def _validate_capabilities(plan: SimulationPlan) -> None:
+        if plan.material["plane_mode"] == "strain":
+            raise UnsupportedCapabilityError(PLANE_STRAIN_UNSUPPORTED_MESSAGE)
 
     @staticmethod
     def _project_context(project: EngineeringProject) -> dict[str, Any]:
@@ -185,6 +220,10 @@ class ArchitectAgent:
                 if default_section
                 else {"thickness": 0.01, "plane_mode": "stress"}
             ),
+            "agentCapabilities": {
+                "planeModes": ["stress"],
+                "unsupportedPlaneModesRequireUserRevision": ["strain"],
+            },
             "materials": [material.to_dict() for material in project.materials],
             "parts": [
                 {

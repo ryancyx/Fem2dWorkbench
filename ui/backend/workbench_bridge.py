@@ -11,7 +11,7 @@ import uuid
 from agent.llm_providers import LLMProviderConfig, llm_environment_diagnostics
 from agent.workflow_factory import create_agent_workflow
 from agent.workflow_orchestrator import WorkflowOrchestrator
-from agent.workflow_state import WorkflowStatus
+from agent.workflow_state import WorkflowStage, WorkflowStatus
 
 def _use_qt_fallback() -> bool:
     return "pytest" in sys.modules or "_pytest" in sys.modules
@@ -171,6 +171,7 @@ from services.sketch_geometry_service import (
     get_sketch_points,
     move_sketch_point,
 )
+from ui.backend.agent_mesh_runtime import generate_agent_mesh_isolated
 from ui.backend.workbench_tasks import FunctionWorker
 
 
@@ -228,6 +229,7 @@ class WorkbenchBridge(QObject):
     sketchMeshChanged = Signal()
     partEditChanged = Signal()
     agentStateChanged = Signal()
+    agentStageRequested = Signal(str)
 
     def __init__(
         self,
@@ -357,6 +359,9 @@ class WorkbenchBridge(QObject):
         self._agent_orchestrator: WorkflowOrchestrator | None = None
         self._agent_status = WorkflowStatus.IDLE.value
         self._agent_stage = "ARCHITECT"
+        self._agent_progress = 0.0
+        self._agent_attempt = 1
+        self._agent_max_attempts = 3
         self._agent_diagnosis = ""
         self._agent_evidence = ""
         self._agent_repair_proposals_json = "[]"
@@ -364,6 +369,8 @@ class WorkbenchBridge(QObject):
         self._agent_safety_warning = ""
         self._agent_had_user_definitions = False
         self._agent_previous_geometry: dict[str, object] | None = None
+        if not _USE_FALLBACK:
+            self.agentStageRequested.connect(self._set_agent_running_state)
         cleanup_old_cache_dirs()
 
     @Property(bool, notify=partEditChanged)
@@ -548,6 +555,22 @@ class WorkbenchBridge(QObject):
     def agentStage(self) -> str:
         return self._agent_stage
 
+    @Property(float, notify=agentStateChanged)
+    def agentProgress(self) -> float:
+        return self._agent_progress
+
+    @Property(int, notify=agentStateChanged)
+    def agentAttempt(self) -> int:
+        return self._agent_attempt
+
+    @Property(int, notify=agentStateChanged)
+    def agentMaxAttempts(self) -> int:
+        return self._agent_max_attempts
+
+    @Property(str, notify=agentStateChanged)
+    def agentAttemptText(self) -> str:
+        return f"Attempt {self._agent_attempt} / {self._agent_max_attempts}"
+
     @Property(str, notify=agentStateChanged)
     def agentDiagnosis(self) -> str:
         return self._agent_diagnosis
@@ -575,6 +598,10 @@ class WorkbenchBridge(QObject):
     @Property(bool, notify=agentStateChanged)
     def agentCanRevise(self) -> bool:
         return self._agent_status == WorkflowStatus.WAITING_USER_INPUT.value
+
+    @Property(bool, notify=agentStateChanged)
+    def agentIsRunning(self) -> bool:
+        return self._agent_status == WorkflowStatus.RUNNING.value
 
     @Property(int, notify=agentStateChanged)
     def agentProposalCount(self) -> int:
@@ -976,7 +1003,7 @@ class WorkbenchBridge(QObject):
         if not prompt:
             self._set_status_text("请输入自然语言仿真需求")
             return False
-        if self.is_busy:
+        if self.is_busy or self.agentIsRunning:
             self._set_status_text("当前任务尚未结束，请稍候")
             return False
         try:
@@ -996,12 +1023,8 @@ class WorkbenchBridge(QObject):
                 raise RuntimeError("Agent workflow initialization failed")
             if orchestrator.state.status == WorkflowStatus.WAITING_APPROVAL:
                 raise ValueError("请先确认或拒绝当前 RepairProposal")
-            self._begin_busy(
-                "Agent 1.0",
-                "正在理解自然语言并执行仿真工作流",
-                "agent_architect",
-                0,
-            )
+            self._agent_attempt = 1
+            self._agent_max_attempts = orchestrator.state.max_retries + 1
             self._set_agent_running_state("ARCHITECT")
 
             def task(progress_callback):
@@ -1021,7 +1044,7 @@ class WorkbenchBridge(QObject):
 
     @Slot(int, result=bool)
     def confirmAgentRepair(self, proposal_index: int) -> bool:
-        if self.is_busy:
+        if self.is_busy or self.agentIsRunning:
             self._set_status_text("当前任务尚未结束，请稍候")
             return False
         orchestrator = self._agent_orchestrator
@@ -1029,12 +1052,11 @@ class WorkbenchBridge(QObject):
             self._set_status_text("当前没有等待确认的 RepairProposal")
             return False
         try:
-            self._begin_busy(
-                "Agent 1.0",
-                "正在应用已确认的修复并重新执行完整工作流",
-                "agent_retry",
-                0,
+            self._agent_attempt = min(
+                orchestrator.state.retry_count + 2,
+                orchestrator.state.max_retries + 1,
             )
+            self._agent_max_attempts = orchestrator.state.max_retries + 1
             self._set_agent_running_state("GEOMETRY")
 
             def task(progress_callback):
@@ -1054,7 +1076,7 @@ class WorkbenchBridge(QObject):
 
     @Slot(result=bool)
     def rejectAgentRepair(self) -> bool:
-        if self.is_busy:
+        if self.is_busy or self.agentIsRunning:
             self._set_status_text("当前任务尚未结束，请稍候")
             return False
         orchestrator = self._agent_orchestrator
@@ -3256,24 +3278,14 @@ class WorkbenchBridge(QObject):
         }
 
     def _launch_agent_task(self, task, *, success_handler, failure_prefix: str) -> None:
-        """Run the Agent chain on Qt's main thread because Gmsh installs signals.
-
-        Gmsh's Python initialization calls ``signal.signal`` and therefore cannot run
-        inside the QThread used by ordinary solve workers.  A zero-delay Qt callback
-        keeps button handling asynchronous while preserving the required main thread.
-        """
-        def run() -> None:
-            try:
-                payload = task(self._handle_worker_progress)
-            except Exception as exc:
-                self._handle_agent_worker_failed(f"{failure_prefix}: {exc}")
-                return
-            success_handler(payload)
-
-        if _USE_FALLBACK:
-            run()
-        else:
-            QTimer.singleShot(0, run)
+        """Run orchestration off the GUI thread; Gmsh is isolated by its mesh adapter."""
+        self._launch_worker(
+            task,
+            success_handler=success_handler,
+            failure_prefix=failure_prefix,
+            failure_handler=self._handle_agent_worker_failed,
+            progress_handler=self._handle_agent_worker_progress,
+        )
 
     def _launch_worker(
         self,
@@ -3282,11 +3294,13 @@ class WorkbenchBridge(QObject):
         success_handler,
         failure_prefix: str,
         failure_handler=None,
+        progress_handler=None,
     ) -> None:
         resolved_failure_handler = failure_handler or self._handle_worker_failed
+        resolved_progress_handler = progress_handler or self._handle_worker_progress
         if _USE_FALLBACK:
             try:
-                payload = task(self._handle_worker_progress)
+                payload = task(resolved_progress_handler)
             except Exception as exc:
                 resolved_failure_handler(f"{failure_prefix}: {exc}")
                 return
@@ -3297,7 +3311,7 @@ class WorkbenchBridge(QObject):
         thread = QThread()
         worker = FunctionWorker(task)
         worker.moveToThread(thread)
-        worker.progressChanged.connect(self._handle_worker_progress)
+        worker.progressChanged.connect(resolved_progress_handler)
         worker.finished.connect(success_handler)
         worker.failed.connect(
             lambda message: resolved_failure_handler(f"{failure_prefix}: {message}")
@@ -3346,16 +3360,35 @@ class WorkbenchBridge(QObject):
     def _handle_worker_progress(self, progress: int, message: str, stage: str) -> None:
         self._update_busy(progress, message, stage, indeterminate=False)
 
+    def _handle_agent_worker_progress(
+        self,
+        _progress: int,
+        _message: str,
+        _stage: str,
+    ) -> None:
+        # Agent progress is derived from WorkflowStage in its dedicated popup.
+        return None
+
+    def _publish_agent_stage(self, stage: str) -> None:
+        if _USE_FALLBACK:
+            self._set_agent_running_state(stage)
+        else:
+            self.agentStageRequested.emit(str(stage))
+
     def _set_agent_running_state(self, stage: str) -> None:
         self._agent_status = WorkflowStatus.RUNNING.value
         self._agent_stage = str(stage)
+        self._agent_progress = self._agent_progress_for(
+            self._agent_stage,
+            self._agent_status,
+            self._agent_progress,
+        )
         self.agentStateChanged.emit()
+        self._process_ui_events()
 
     def _handle_agent_worker_failed(self, message: str) -> None:
         self._cleanup_worker()
         self._agent_status = WorkflowStatus.FAILED.value
-        self._agent_stage = "FAILED"
-        self._finish_busy()
         self._set_status_text(str(message))
         self.agentStateChanged.emit()
 
@@ -3365,14 +3398,21 @@ class WorkbenchBridge(QObject):
         self._apply_agent_state(state)
         solution_payload = payload.get("solution_payload")
         if isinstance(solution_payload, dict):
-            self._apply_solve_payload(solution_payload)
+            self._apply_agent_solution_payload(solution_payload)
             self._set_status_text("Agent 工作流完成，可在“求解结果”中查看结果与云图")
         else:
-            self._finish_busy()
             if state.status == WorkflowStatus.WAITING_APPROVAL:
                 self._set_status_text("Reviewer 已生成 RepairProposal，请确认或拒绝")
             elif state.status == WorkflowStatus.WAITING_USER_INPUT:
-                self._set_status_text("Agent 正在等待新的自然语言修改说明")
+                execution_result = state.execution_result
+                if (
+                    execution_result is not None
+                    and execution_result.stage == WorkflowStage.ARCHITECT.value
+                    and execution_result.error_message
+                ):
+                    self._set_status_text(execution_result.error_message)
+                else:
+                    self._set_status_text("Agent 正在等待新的自然语言修改说明")
             elif state.status == WorkflowStatus.FAILED:
                 self._set_status_text("Agent 工作流失败，请查看诊断信息")
 
@@ -3381,6 +3421,13 @@ class WorkbenchBridge(QObject):
         self.project_dirty = True
         self._agent_status = state.status.value
         self._agent_stage = state.current_stage.value
+        self._agent_attempt = state.retry_count + 1
+        self._agent_max_attempts = state.max_retries + 1
+        self._agent_progress = self._agent_progress_for(
+            self._agent_stage,
+            self._agent_status,
+            self._agent_progress,
+        )
         review = state.review_result
         if review is None:
             self._agent_diagnosis = ""
@@ -3412,6 +3459,29 @@ class WorkbenchBridge(QObject):
         self.resultChanged.emit()
         self.agentStateChanged.emit()
 
+    def _apply_agent_solution_payload(self, payload: dict[str, object]) -> None:
+        """Publish Agent results without touching the existing busy/progress system."""
+        self.current_solution = payload["solution"]  # type: ignore[assignment]
+        self.current_sketch_mesh = payload["mesh"]  # type: ignore[assignment]
+        self.node_rows = list(payload["node_rows"])  # type: ignore[arg-type]
+        self.element_rows = list(payload["element_rows"])  # type: ignore[arg-type]
+        self.summary = payload["summary"]  # type: ignore[assignment]
+        self.node_rows_json = str(payload["node_rows_json"])
+        self.element_rows_json = str(payload["element_rows_json"])
+        self.deformation_preview_json = str(payload["deformation_preview_json"])
+        self.deformation_plot_json = self.deformation_preview_json
+        self.displacement_contour_json = str(payload["displacement_contour_json"])
+        self.stress_contour_json = str(payload["stress_contour_json"])
+        self.stress_contour_exact_json = str(payload["stress_contour_exact_json"])
+        self.stress_contour_smooth_json = str(payload["stress_contour_smooth_json"])
+        self.contour_cache_valid = True
+        self.contour_cache_summary_text = "云图数据缓存有效"
+        self.contour_image_cache_dir = str(payload["contour_image_cache_dir"])
+        self.contour_image_cache_json = str(payload["contour_image_cache_json"])
+        self.contour_image_cache_valid = bool(payload["contour_image_cache_valid"])
+        self._sync_sketch_mesh_from_current_mesh()
+        self.resultChanged.emit()
+
     def _capture_agent_geometry_safety_context(self, project: EngineeringProject) -> None:
         managed_bc_ids = {
             str(item) for item in project.metadata.get("agent_boundary_condition_ids", [])
@@ -3438,18 +3508,25 @@ class WorkbenchBridge(QObject):
             flush=True,
         )
         if self._llm_client_factory is not None:
-            return self._workflow_factory(
+            workflow = self._workflow_factory(
                 project,
                 llm_client=self._llm_client_factory(),
                 max_retries=2,
             )
-        config = LLMProviderConfig.from_env()
-        return self._workflow_factory(project, config=config, max_retries=2)
+        else:
+            config = LLMProviderConfig.from_env()
+            workflow = self._workflow_factory(project, config=config, max_retries=2)
+        workflow.mesh_generator = generate_agent_mesh_isolated
+        self._install_agent_stage_observers(workflow)
+        return workflow
 
     def _reset_agent_workflow_state(self) -> None:
         self._agent_orchestrator = None
         self._agent_status = WorkflowStatus.IDLE.value
         self._agent_stage = "ARCHITECT"
+        self._agent_progress = 0.0
+        self._agent_attempt = 1
+        self._agent_max_attempts = 3
         self._agent_diagnosis = ""
         self._agent_evidence = ""
         self._agent_repair_proposals_json = "[]"
@@ -3458,6 +3535,58 @@ class WorkbenchBridge(QObject):
         self._agent_had_user_definitions = False
         self._agent_previous_geometry = None
         self.agentStateChanged.emit()
+
+    def _install_agent_stage_observers(self, workflow: WorkflowOrchestrator) -> None:
+        def observe_method(owner, method_name: str, stage: WorkflowStage) -> None:
+            original = getattr(owner, method_name)
+
+            def observed(*args, **kwargs):
+                self._publish_agent_stage(stage.value)
+                return original(*args, **kwargs)
+
+            setattr(owner, method_name, observed)
+
+        observe_method(workflow.geometry_agent, "create", WorkflowStage.GEOMETRY)
+        observe_method(workflow.material_agent, "apply", WorkflowStage.MATERIAL)
+        observe_method(workflow.bc_load_agent, "apply", WorkflowStage.BC_LOAD)
+        if workflow.reviewer_agent is not None:
+            observe_method(workflow.reviewer_agent, "review", WorkflowStage.REVIEW)
+
+        original_mesh_generator = workflow.mesh_generator
+
+        def observed_mesh_generator(*args, **kwargs):
+            self._publish_agent_stage(WorkflowStage.MESH.value)
+            return original_mesh_generator(*args, **kwargs)
+
+        workflow.mesh_generator = observed_mesh_generator
+        original_compiler = workflow.compiler
+
+        def observed_compiler(*args, **kwargs):
+            self._publish_agent_stage(WorkflowStage.SOLVE.value)
+            return original_compiler(*args, **kwargs)
+
+        workflow.compiler = observed_compiler
+
+    @staticmethod
+    def _agent_progress_for(stage: str, status: str, current: float) -> float:
+        if status == WorkflowStatus.FAILED.value:
+            return float(current)
+        if status == WorkflowStatus.IDLE.value:
+            return 0.0
+        if status == WorkflowStatus.COMPLETED.value:
+            return 1.0
+        progress_by_stage = {
+            WorkflowStage.ARCHITECT.value: 0.10,
+            WorkflowStage.GEOMETRY.value: 0.22,
+            WorkflowStage.MATERIAL.value: 0.36,
+            WorkflowStage.BC_LOAD.value: 0.50,
+            WorkflowStage.MESH.value: 0.65,
+            WorkflowStage.SOLVE.value: 0.82,
+            WorkflowStage.REVIEW.value: 0.90,
+            WorkflowStage.APPROVAL.value: 0.94,
+            WorkflowStage.RESULT.value: 1.00,
+        }
+        return progress_by_stage.get(str(stage), float(current))
 
     def _update_agent_geometry_safety_warning(self, project: EngineeringProject) -> None:
         current_geometry = self._active_geometry_snapshot(project)

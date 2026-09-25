@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.review_models import RepairProposal, ReviewResult
+from agent.simulation_plan import SimulationPlan
 from agent.workflow_orchestrator import WorkflowOrchestrator
 from agent.workflow_state import WorkflowStage, WorkflowStatus
 from core.engineering.boundary_condition_definition import BoundaryConditionDefinition
@@ -189,6 +190,29 @@ def test_orchestrator_runs_deterministic_success_path_in_order(empty_project, va
     assert state.current_stage == WorkflowStage.RESULT
     assert state.execution_result is not None and state.execution_result.success
     assert state.result_data == {"requestedResult": "von_mises"}
+
+
+def test_plane_stress_analysis_can_request_strain_result(empty_project, valid_plan) -> None:
+    data = valid_plan.to_dict()
+    data["material"]["plane_mode"] = "stress"
+    data["requestedResult"] = "strain"
+    plan = SimulationPlan.from_dict(data)
+    orchestrator, calls = _orchestrator(empty_project, plan)
+
+    state = orchestrator.start("Run plane stress and return strain results")
+
+    assert calls == [
+        "architect",
+        "geometry",
+        "material",
+        "bc_load",
+        "mesh",
+        "compile",
+        "solve",
+        "result",
+    ]
+    assert state.status == WorkflowStatus.COMPLETED
+    assert state.result_data == {"requestedResult": "strain"}
 
 
 @pytest.mark.parametrize(

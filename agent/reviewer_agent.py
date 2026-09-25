@@ -17,6 +17,11 @@ the compact current EngineeringProject snapshot, and the ExecutionResult. Check 
 model consistency, geometry targets, material assignment and parameters, two-dimensional
 rigid-body restraints (Tx, Ty, Rz), load targets/vectors, mesh state, and the reported
 execution error. Every diagnosis must cite concrete evidence from the supplied context.
+Keep these two independent concepts strictly separate: material.plane_mode="strain"
+means a plane-strain analysis assumption, while requestedResult="strain" asks for strain
+visualization/output. A plan with material.plane_mode="stress" and
+requestedResult="strain" is a valid plane-stress analysis requesting strain results; do
+not diagnose that combination as an unsupported plane-strain analysis.
 Return only schema-constrained ReviewResult data. Propose the smallest executable repairs
 to the SimulationPlan using semantic selectors or coordinates, never internal entity IDs.
 For a completely unrestrained two-dimensional model, do not propose fixing only one point:

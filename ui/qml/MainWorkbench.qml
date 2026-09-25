@@ -2271,53 +2271,339 @@ ApplicationWindow {
         onAccepted: bridge.exportAllResults(root.fileUrlToLocalPath(selectedFolder))
     }
 
-    Dialog {
+    Popup {
         id: agentDialog
         modal: false
+        dim: false
         parent: Overlay.overlay
-        width: Math.min(760, root.width - 80)
-        height: Math.min(720, root.height - 80)
+        width: Math.min(400, root.width - 32)
+        height: Math.min(300, root.height - 48)
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
-        title: "Fem2dWorkbench Agent 1.0"
         closePolicy: Popup.CloseOnEscape
-        standardButtons: Dialog.NoButton
+        padding: 16
+        background: Item {
+            Rectangle {
+                anchors.fill: parent
+                anchors.topMargin: 4
+                radius: 12
+                color: "#260F172A"
+            }
+            Rectangle {
+                anchors.fill: parent
+                anchors.bottomMargin: 4
+                radius: 12
+                color: root.uiCardColor
+                border.color: root.uiBorderColor
+                border.width: 1
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "Fem2dWorkbench Agent 1.0"
+                    font.bold: true
+                    font.pixelSize: 15
+                    color: root.uiTextColor
+                }
+                Item { Layout.fillWidth: true }
+                WorkbenchButton {
+                    text: "关闭"
+                    Layout.preferredWidth: 64
+                    onClicked: agentDialog.close()
+                }
+            }
+            Label {
+                text: "自然语言仿真需求"
+                font.bold: true
+                color: root.uiTextColor
+            }
+            WorkbenchTextArea {
+                id: agentPromptInput
+                objectName: "agentPromptInput"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                enabled: !bridge.agentIsRunning
+                placeholderText: "例如：创建 100×50 矩形，钢材 E=210000、ν=0.3，左边完全固定，右边施加 [100,0] 均布载荷，网格尺寸 5，求 von Mises 应力。"
+            }
+            WorkbenchButton {
+                id: agentStartButton
+                objectName: "agentStartButton"
+                Layout.fillWidth: true
+                text: "启动 Agent 工作流"
+                visualRole: "strongPrimary"
+                enabled: !bridge.agentIsRunning && agentPromptInput.text.trim() !== ""
+                onClicked: {
+                    if (bridge.startAgentWorkflow(agentPromptInput.text)) {
+                        agentDialog.close()
+                        agentProgressPopup.beginRun()
+                    }
+                }
+            }
+        }
+    }
+
+    Popup {
+        id: agentProgressPopup
+        objectName: "agentProgressPopup"
+        property real displayProgress: 0
+        property real targetProgress: 0
+        property real progressShineOffset: -0.35
+        property double stageStartedMs: 0
+        property double lastTickMs: 0
+        property string trackedStage: ""
+        property int trackedAttempt: 0
+        property bool visualFinishActive: false
+        property bool expandedContent: bridge.agentNeedsApproval
+                                      || bridge.agentCanRevise
+                                      || bridge.agentDiagnosis !== ""
+                                      || bridge.agentEvidence !== ""
+                                      || bridge.agentSafetyWarning !== ""
+        modal: false
+        dim: false
+        parent: Overlay.overlay
+        width: Math.min(400, root.width - 32)
+        height: expandedContent
+                ? Math.min(620, root.height - 48)
+                : Math.min(190, root.height - 48)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        closePolicy: bridge.agentIsRunning ? Popup.NoAutoClose : Popup.CloseOnEscape
+        padding: 16
+        background: Item {
+            Rectangle {
+                anchors.fill: parent
+                anchors.topMargin: 4
+                radius: 12
+                color: "#260F172A"
+            }
+            Rectangle {
+                anchors.fill: parent
+                anchors.bottomMargin: 4
+                radius: 12
+                color: root.uiCardColor
+                border.color: root.uiBorderColor
+                border.width: 1
+            }
+        }
+
+        function stageMessage(stage) {
+            if (stage === "ARCHITECT") return "正在理解需求并生成仿真计划"
+            if (stage === "GEOMETRY") return "正在创建几何模型"
+            if (stage === "MATERIAL") return "正在创建并分配材料"
+            if (stage === "BC_LOAD") return "正在应用约束与载荷"
+            if (stage === "MESH") return "正在生成有限元网格"
+            if (stage === "SOLVE") return "正在求解有限元模型"
+            if (stage === "REVIEW") return "Reviewer 正在诊断执行结果"
+            if (stage === "APPROVAL") return "等待确认 RepairProposal"
+            if (stage === "RESULT") return "正在整理求解结果"
+            return "正在执行 Agent 工作流"
+        }
+
+        function stageRange(stage) {
+            if (stage === "ARCHITECT") return [5, 10, 12000]
+            if (stage === "GEOMETRY") return [10, 22, 8000]
+            if (stage === "MATERIAL") return [22, 36, 8000]
+            if (stage === "BC_LOAD") return [36, 50, 8000]
+            if (stage === "MESH") return [50, 65, 6000]
+            if (stage === "SOLVE") return [65, 82, 10000]
+            if (stage === "REVIEW") return [82, 90, 12000]
+            if (stage === "APPROVAL") return [90, 94, 1000]
+            if (stage === "RESULT") return [94, 100, 1000]
+            return [0, 0, 1000]
+        }
+
+        function beginRun() {
+            agentFinishCloseTimer.stop()
+            visualFinishActive = false
+            if (!visible) open()
+            syncWorkflowState(true)
+        }
+
+        function syncWorkflowState(forceReset) {
+            var range = stageRange(bridge.agentStage)
+            var attemptChanged = trackedAttempt !== bridge.agentAttempt
+            var stageChanged = trackedStage !== bridge.agentStage
+            if (forceReset || attemptChanged) {
+                displayProgress = bridge.agentStage === "ARCHITECT" ? 0 : range[0]
+                lastTickMs = 0
+            }
+            if (forceReset || attemptChanged || stageChanged) {
+                trackedAttempt = bridge.agentAttempt
+                trackedStage = bridge.agentStage
+                stageStartedMs = Date.now()
+                targetProgress = Math.max(displayProgress, range[0])
+            }
+            if (bridge.agentStatus === "WAITING_APPROVAL") {
+                targetProgress = 94
+            } else if (bridge.agentStatus === "COMPLETED") {
+                visualFinishActive = true
+                targetProgress = 100
+            } else if (bridge.agentStatus === "FAILED") {
+                targetProgress = displayProgress
+            }
+        }
+
+        function updateVisualProgress() {
+            var now = Date.now()
+            var dt = lastTickMs > 0 ? now - lastTickMs : 16
+            lastTickMs = now
+            dt = Math.max(8, Math.min(48, dt))
+            var range = stageRange(bridge.agentStage)
+            if (bridge.agentStatus === "RUNNING") {
+                var fraction = Math.min(0.94, Math.max(0, (now - stageStartedMs) / range[2]))
+                var predicted = range[0] + (range[1] - range[0]) * fraction
+                targetProgress = Math.max(targetProgress, predicted)
+                targetProgress = Math.min(targetProgress, range[1] - 0.05)
+            }
+            var diff = targetProgress - displayProgress
+            if (diff > 0.01) {
+                var baseSpeed = visualFinishActive ? 42.0 : 13.0
+                var catchupSpeed = Math.min(36.0, diff * 0.85)
+                var step = (baseSpeed + catchupSpeed) * dt / 1000.0
+                var maxStep = visualFinishActive ? 1.10 : 0.58
+                step = Math.max(0.035, Math.min(step, maxStep))
+                displayProgress = Math.min(displayProgress + step, targetProgress)
+            }
+            if (visualFinishActive && displayProgress >= 99.8) {
+                displayProgress = 100
+                if (!agentFinishCloseTimer.running) agentFinishCloseTimer.start()
+            }
+        }
+
+        NumberAnimation on progressShineOffset {
+            running: agentProgressPopup.visible && displayProgress > 0
+                     && bridge.agentStatus !== "FAILED"
+            loops: Animation.Infinite
+            from: -0.35
+            to: 1.25
+            duration: 1150
+            easing.type: Easing.InOutSine
+        }
+        Timer {
+            id: agentProgressPredictionTimer
+            interval: 16
+            repeat: true
+            running: agentProgressPopup.visible
+                     && (bridge.agentStatus === "RUNNING" || agentProgressPopup.visualFinishActive)
+            onTriggered: agentProgressPopup.updateVisualProgress()
+        }
+        Timer {
+            id: agentFinishCloseTimer
+            interval: 520
+            repeat: false
+            onTriggered: {
+                agentProgressPopup.visualFinishActive = false
+                agentProgressPopup.close()
+            }
+        }
 
         contentItem: ScrollView {
             clip: true
-
             ColumnLayout {
-                width: Math.max(0, agentDialog.width - 44)
-                spacing: 12
-
+                width: Math.max(0, agentProgressPopup.width - 32)
+                spacing: 8
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
-                        text: "状态：" + bridge.agentStatus
+                        text: "Agent 1.0"
                         font.bold: true
+                        font.pixelSize: 15
                         color: root.uiTextColor
                     }
-                    Label {
-                        text: "阶段：" + bridge.agentStage
-                        color: root.uiMutedTextColor
-                    }
                     Item { Layout.fillWidth: true }
+                    Label {
+                        text: bridge.agentStage
+                        color: root.uiMutedTextColor
+                        font.pixelSize: 12
+                    }
                     WorkbenchButton {
                         text: "关闭"
-                        Layout.preferredWidth: 72
-                        onClicked: agentDialog.close()
+                        Layout.preferredWidth: 64
+                        visible: !bridge.agentIsRunning && !bridge.agentNeedsApproval
+                        onClicked: agentProgressPopup.close()
                     }
                 }
-
+                Label {
+                    Layout.fillWidth: true
+                    visible: bridge.agentStatus === "RUNNING"
+                    text: agentProgressPopup.stageMessage(bridge.agentStage)
+                    color: root.uiTextColor
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+                Rectangle {
+                    id: agentProgressTrack
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 6
+                    radius: 3
+                    color: "#E2E8F0"
+                    clip: true
+                    Rectangle {
+                        id: agentProgressFill
+                        width: Math.max(parent.height, parent.width * agentProgressPopup.displayProgress / 100.0)
+                        height: parent.height
+                        radius: 3
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#7FA6D8" }
+                            GradientStop { position: 0.55; color: "#8FB3DD" }
+                            GradientStop { position: 1.0; color: "#B8D0EA" }
+                        }
+                        Behavior on width {
+                            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                        }
+                        Rectangle {
+                            width: Math.max(46, agentProgressTrack.width * 0.20)
+                            height: parent.height * 1.8
+                            y: -parent.height * 0.4
+                            radius: parent.radius
+                            x: agentProgressPopup.progressShineOffset * (agentProgressFill.width + width) - width
+                            rotation: 16
+                            opacity: 0.62
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.00; color: Qt.rgba(1, 1, 1, 0.00) }
+                                GradientStop { position: 0.45; color: Qt.rgba(1, 1, 1, 0.42) }
+                                GradientStop { position: 0.55; color: Qt.rgba(1, 1, 1, 0.72) }
+                                GradientStop { position: 1.00; color: Qt.rgba(1, 1, 1, 0.00) }
+                            }
+                        }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: bridge.agentStage + " · " + bridge.agentAttemptText
+                        color: root.uiMutedTextColor
+                        font.pixelSize: 11
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: Math.round(agentProgressPopup.displayProgress) + "%"
+                        color: root.uiTextColor
+                        font.pixelSize: 11
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: bridge.agentCanRevise || bridge.agentStatus === "FAILED"
+                    text: bridge.statusText
+                    wrapMode: Text.WordWrap
+                    color: bridge.agentStatus === "FAILED" ? "#B91C1C" : root.uiMutedTextColor
+                    font.pixelSize: 12
+                }
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: safetyWarningText.implicitHeight + 20
+                    Layout.preferredHeight: agentSafetyWarningText.implicitHeight + 20
                     visible: bridge.agentSafetyWarning !== ""
                     radius: root.uiControlRadius
                     color: "#FFF7ED"
                     border.color: "#FDBA74"
                     Label {
-                        id: safetyWarningText
+                        id: agentSafetyWarningText
                         anchors.fill: parent
                         anchors.margins: 10
                         text: bridge.agentSafetyWarning
@@ -2325,92 +2611,66 @@ ApplicationWindow {
                         color: "#9A3412"
                     }
                 }
-
-                Label {
-                    text: bridge.agentCanRevise ? "修改说明" : "自然语言仿真需求"
-                    font.bold: true
-                    color: root.uiTextColor
-                }
+                Label { visible: bridge.agentDiagnosis !== ""; text: "Reviewer diagnosis"; font.bold: true; color: root.uiTextColor }
                 WorkbenchTextArea {
-                    id: agentPromptInput
-                    objectName: "agentPromptInput"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 130
-                    enabled: !bridge.isBusy && !bridge.agentNeedsApproval
-                    placeholderText: "例如：创建 100×50 矩形，钢材 E=210000、ν=0.3，左边完全固定，右边施加 [100,0] 均布载荷，网格尺寸 5，求 von Mises 应力。"
+                    objectName: "agentReviewerDiagnosis"
+                    Layout.fillWidth: true; Layout.preferredHeight: 76
+                    visible: bridge.agentDiagnosis !== ""; readOnly: true; text: bridge.agentDiagnosis
                 }
-                WorkbenchButton {
-                    id: agentStartButton
-                    objectName: "agentStartButton"
-                    Layout.fillWidth: true
-                    text: bridge.agentCanRevise ? "提交修改并重新执行" : "启动 Agent 工作流"
-                    visualRole: "strongPrimary"
-                    enabled: !bridge.isBusy && !bridge.agentNeedsApproval && agentPromptInput.text.trim() !== ""
-                    onClicked: bridge.startAgentWorkflow(agentPromptInput.text)
-                }
-
-                Label {
-                    visible: bridge.agentDiagnosis !== ""
-                    text: "Reviewer diagnosis"
-                    font.bold: true
-                    color: root.uiTextColor
-                }
+                Label { visible: bridge.agentEvidence !== ""; text: "Evidence"; font.bold: true; color: root.uiTextColor }
                 WorkbenchTextArea {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 76
-                    visible: bridge.agentDiagnosis !== ""
-                    readOnly: true
-                    text: bridge.agentDiagnosis
+                    objectName: "agentReviewerEvidence"
+                    Layout.fillWidth: true; Layout.preferredHeight: 82
+                    visible: bridge.agentEvidence !== ""; readOnly: true; text: bridge.agentEvidence
                 }
-                Label {
-                    visible: bridge.agentEvidence !== ""
-                    text: "Evidence"
-                    font.bold: true
-                    color: root.uiTextColor
-                }
-                WorkbenchTextArea {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 82
-                    visible: bridge.agentEvidence !== ""
-                    readOnly: true
-                    text: bridge.agentEvidence
-                }
-
-                Label {
-                    visible: bridge.agentNeedsApproval
-                    text: "RepairProposal"
-                    font.bold: true
-                    color: root.uiTextColor
-                }
+                Label { visible: bridge.agentNeedsApproval; text: "RepairProposal"; font.bold: true; color: root.uiTextColor }
                 WorkbenchComboBox {
                     id: agentProposalCombo
-                    Layout.fillWidth: true
-                    visible: bridge.agentNeedsApproval
-                    model: root.agentProposalTitles()
+                    objectName: "agentProposalCombo"
+                    Layout.fillWidth: true; visible: bridge.agentNeedsApproval; model: root.agentProposalTitles()
                 }
                 WorkbenchTextArea {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 100
-                    visible: bridge.agentNeedsApproval
-                    readOnly: true
-                    text: bridge.agentRepairProposalsText
+                    objectName: "agentRepairProposal"
+                    Layout.fillWidth: true; Layout.preferredHeight: 100
+                    visible: bridge.agentNeedsApproval; readOnly: true; text: bridge.agentRepairProposalsText
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     visible: bridge.agentNeedsApproval
                     WorkbenchButton {
-                        Layout.fillWidth: true
-                        text: "Confirm 并重试"
-                        visualRole: "strongPrimary"
-                        enabled: !bridge.isBusy && agentProposalCombo.currentIndex >= 0
-                        onClicked: bridge.confirmAgentRepair(agentProposalCombo.currentIndex)
+                        objectName: "agentConfirmButton"
+                        Layout.fillWidth: true; text: "Confirm 并重试"; visualRole: "strongPrimary"
+                        enabled: !bridge.agentIsRunning && agentProposalCombo.currentIndex >= 0
+                        onClicked: {
+                            if (bridge.confirmAgentRepair(agentProposalCombo.currentIndex))
+                                agentProgressPopup.beginRun()
+                        }
                     }
                     WorkbenchButton {
-                        Layout.fillWidth: true
-                        text: "Reject，返回修改"
-                        visualRole: "danger"
-                        enabled: !bridge.isBusy
+                        objectName: "agentRejectButton"
+                        Layout.fillWidth: true; text: "Reject，返回修改"; visualRole: "danger"
+                        enabled: !bridge.agentIsRunning
                         onClicked: bridge.rejectAgentRepair()
+                    }
+                }
+                Label { visible: bridge.agentCanRevise; text: "修改说明"; font.bold: true; color: root.uiTextColor }
+                WorkbenchTextArea {
+                    id: agentRevisionInput
+                    objectName: "agentRevisionInput"
+                    Layout.fillWidth: true; Layout.preferredHeight: 100
+                    visible: bridge.agentCanRevise
+                    placeholderText: "说明需要如何修改模型，然后重新执行。"
+                }
+                WorkbenchButton {
+                    objectName: "agentRevisionButton"
+                    Layout.fillWidth: true
+                    visible: bridge.agentCanRevise
+                    text: "提交修改并重新执行"
+                    visualRole: "strongPrimary"
+                    enabled: agentRevisionInput.text.trim() !== "" && !bridge.agentIsRunning
+                    onClicked: {
+                        if (bridge.startAgentWorkflow(agentRevisionInput.text))
+                            agentProgressPopup.beginRun()
                     }
                 }
             }
@@ -2420,8 +2680,21 @@ ApplicationWindow {
     Connections {
         target: bridge
         function onAgentStateChanged() {
+            if (bridge.agentStatus === "IDLE") {
+                agentProgressPopup.close()
+            } else if (bridge.agentStatus === "RUNNING") {
+                if (!agentProgressPopup.visible) agentProgressPopup.open()
+                agentProgressPopup.syncWorkflowState(false)
+            } else if (bridge.agentStatus === "WAITING_APPROVAL"
+                       || bridge.agentStatus === "WAITING_USER_INPUT"
+                       || bridge.agentStatus === "FAILED") {
+                if (!agentProgressPopup.visible) agentProgressPopup.open()
+                agentProgressPopup.syncWorkflowState(false)
+            }
             if (bridge.agentStatus === "COMPLETED") {
                 root.switchMode("求解结果")
+                if (!agentProgressPopup.visible) agentProgressPopup.open()
+                agentProgressPopup.syncWorkflowState(false)
             }
         }
     }
@@ -3039,7 +3312,17 @@ ApplicationWindow {
                         text: "Agent 1.0"
                         visualRole: "strongPrimary"
                         enabled: !bridge.isBusy
-                        onClicked: agentDialog.open()
+                        onClicked: {
+                            if (bridge.agentStatus === "RUNNING"
+                                    || bridge.agentStatus === "WAITING_APPROVAL"
+                                    || bridge.agentStatus === "WAITING_USER_INPUT"
+                                    || bridge.agentStatus === "FAILED") {
+                                agentProgressPopup.open()
+                                agentProgressPopup.syncWorkflowState(false)
+                            } else {
+                                agentDialog.open()
+                            }
+                        }
                     }
 
                     WorkbenchButton {
