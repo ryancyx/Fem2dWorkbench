@@ -8,6 +8,10 @@ from pathlib import Path
 import sys
 import uuid
 
+from agent.llm_providers import LLMProviderConfig, llm_environment_diagnostics
+from agent.workflow_factory import create_agent_workflow
+from agent.workflow_orchestrator import WorkflowOrchestrator
+from agent.workflow_state import WorkflowStatus
 
 def _use_qt_fallback() -> bool:
     return "pytest" in sys.modules or "_pytest" in sys.modules
@@ -132,7 +136,7 @@ from services.part_edit_service import (
     rename_part,
     set_active_part,
 )
-from services.project_factory_service import create_rectangle_plate_project
+from services.project_factory_service import create_empty_workbench_project, create_rectangle_plate_project
 from services.project_file_service import load_workbench_project, save_workbench_project
 from services.project_parameter_service import (
     WorkbenchProjectParameters,
@@ -223,8 +227,14 @@ class WorkbenchBridge(QObject):
     sketchChanged = Signal()
     sketchMeshChanged = Signal()
     partEditChanged = Signal()
+    agentStateChanged = Signal()
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        llm_client_factory=None,
+        workflow_factory=create_agent_workflow,
+    ) -> None:
         super().__init__()
         self.current_project: EngineeringProject | None = None
         self.current_solution: WorkbenchSolveResult | None = None
@@ -342,6 +352,18 @@ class WorkbenchBridge(QObject):
         self._session_cache_id = uuid.uuid4().hex
         self._active_thread: QThread | None = None
         self._active_worker: FunctionWorker | None = None
+        self._llm_client_factory = llm_client_factory
+        self._workflow_factory = workflow_factory
+        self._agent_orchestrator: WorkflowOrchestrator | None = None
+        self._agent_status = WorkflowStatus.IDLE.value
+        self._agent_stage = "ARCHITECT"
+        self._agent_diagnosis = ""
+        self._agent_evidence = ""
+        self._agent_repair_proposals_json = "[]"
+        self._agent_repair_proposals_text = ""
+        self._agent_safety_warning = ""
+        self._agent_had_user_definitions = False
+        self._agent_previous_geometry: dict[str, object] | None = None
         cleanup_old_cache_dirs()
 
     @Property(bool, notify=partEditChanged)
@@ -517,6 +539,49 @@ class WorkbenchBridge(QObject):
     @Property(str, notify=statusTextChanged)
     def statusText(self) -> str:
         return self._status_text
+
+    @Property(str, notify=agentStateChanged)
+    def agentStatus(self) -> str:
+        return self._agent_status
+
+    @Property(str, notify=agentStateChanged)
+    def agentStage(self) -> str:
+        return self._agent_stage
+
+    @Property(str, notify=agentStateChanged)
+    def agentDiagnosis(self) -> str:
+        return self._agent_diagnosis
+
+    @Property(str, notify=agentStateChanged)
+    def agentEvidence(self) -> str:
+        return self._agent_evidence
+
+    @Property(str, notify=agentStateChanged)
+    def agentRepairProposalsJson(self) -> str:
+        return self._agent_repair_proposals_json
+
+    @Property(str, notify=agentStateChanged)
+    def agentRepairProposalsText(self) -> str:
+        return self._agent_repair_proposals_text
+
+    @Property(str, notify=agentStateChanged)
+    def agentSafetyWarning(self) -> str:
+        return self._agent_safety_warning
+
+    @Property(bool, notify=agentStateChanged)
+    def agentNeedsApproval(self) -> bool:
+        return self._agent_status == WorkflowStatus.WAITING_APPROVAL.value
+
+    @Property(bool, notify=agentStateChanged)
+    def agentCanRevise(self) -> bool:
+        return self._agent_status == WorkflowStatus.WAITING_USER_INPUT.value
+
+    @Property(int, notify=agentStateChanged)
+    def agentProposalCount(self) -> int:
+        try:
+            return len(json.loads(self._agent_repair_proposals_json))
+        except (TypeError, ValueError):
+            return 0
 
     @Property(int, notify=resultChanged)
     def nodeCount(self) -> int:
@@ -905,9 +970,110 @@ class WorkbenchBridge(QObject):
     def sketchMeshStatusText(self) -> str:
         return self.sketch_mesh_status_text
 
+    @Slot(str, result=bool)
+    def startAgentWorkflow(self, user_input: str) -> bool:
+        prompt = str(user_input).strip()
+        if not prompt:
+            self._set_status_text("请输入自然语言仿真需求")
+            return False
+        if self.is_busy:
+            self._set_status_text("当前任务尚未结束，请稍候")
+            return False
+        try:
+            continuing_revision = (
+                self._agent_orchestrator is not None
+                and self._agent_orchestrator.state.status == WorkflowStatus.WAITING_USER_INPUT
+            )
+            if not continuing_revision:
+                source_project = self.current_project or create_empty_workbench_project(
+                    "agent_project"
+                )
+                project_snapshot = copy.deepcopy(source_project)
+                self._capture_agent_geometry_safety_context(source_project)
+                self._agent_orchestrator = self._create_agent_workflow(project_snapshot)
+            orchestrator = self._agent_orchestrator
+            if orchestrator is None:
+                raise RuntimeError("Agent workflow initialization failed")
+            if orchestrator.state.status == WorkflowStatus.WAITING_APPROVAL:
+                raise ValueError("请先确认或拒绝当前 RepairProposal")
+            self._begin_busy(
+                "Agent 1.0",
+                "正在理解自然语言并执行仿真工作流",
+                "agent_architect",
+                0,
+            )
+            self._set_agent_running_state("ARCHITECT")
+
+            def task(progress_callback):
+                progress_callback(5, "Architect 正在生成 SimulationPlan", "agent_architect")
+                state = orchestrator.start(prompt)
+                return self._build_agent_workflow_payload(state, progress_callback)
+
+            self._launch_agent_task(
+                task,
+                success_handler=self._apply_agent_workflow_payload,
+                failure_prefix="Agent 工作流失败",
+            )
+            return True
+        except Exception as exc:
+            self._handle_agent_worker_failed(f"Agent 工作流失败: {exc}")
+            return False
+
+    @Slot(int, result=bool)
+    def confirmAgentRepair(self, proposal_index: int) -> bool:
+        if self.is_busy:
+            self._set_status_text("当前任务尚未结束，请稍候")
+            return False
+        orchestrator = self._agent_orchestrator
+        if orchestrator is None or orchestrator.state.status != WorkflowStatus.WAITING_APPROVAL:
+            self._set_status_text("当前没有等待确认的 RepairProposal")
+            return False
+        try:
+            self._begin_busy(
+                "Agent 1.0",
+                "正在应用已确认的修复并重新执行完整工作流",
+                "agent_retry",
+                0,
+            )
+            self._set_agent_running_state("GEOMETRY")
+
+            def task(progress_callback):
+                progress_callback(5, "应用 RepairProposal，SimulationPlan 版本递增", "agent_retry")
+                state = orchestrator.handle_approval(True, int(proposal_index))
+                return self._build_agent_workflow_payload(state, progress_callback)
+
+            self._launch_agent_task(
+                task,
+                success_handler=self._apply_agent_workflow_payload,
+                failure_prefix="Agent 修复重试失败",
+            )
+            return True
+        except Exception as exc:
+            self._handle_agent_worker_failed(f"Agent 修复重试失败: {exc}")
+            return False
+
+    @Slot(result=bool)
+    def rejectAgentRepair(self) -> bool:
+        if self.is_busy:
+            self._set_status_text("当前任务尚未结束，请稍候")
+            return False
+        orchestrator = self._agent_orchestrator
+        if orchestrator is None or orchestrator.state.status != WorkflowStatus.WAITING_APPROVAL:
+            self._set_status_text("当前没有等待拒绝的 RepairProposal")
+            return False
+        try:
+            state = orchestrator.handle_approval(False)
+            self._apply_agent_state(state)
+            self._set_status_text("已拒绝 RepairProposal，可修改自然语言后重新执行")
+            return True
+        except Exception as exc:
+            self._handle_agent_worker_failed(f"拒绝 RepairProposal 失败: {exc}")
+            return False
+
     @Slot(result=bool)
     def newProject(self) -> bool:
         try:
+            self._reset_agent_workflow_state()
             self.current_project = create_rectangle_plate_project(
                 width=2.0,
                 height=1.0,
@@ -958,6 +1124,7 @@ class WorkbenchBridge(QObject):
         qy: float,
     ) -> bool:
         try:
+            self._reset_agent_workflow_state()
             project_name = self.projectName or "ui_rectangle_demo"
             self.current_project = create_rectangle_plate_project(
                 width=width,
@@ -1014,6 +1181,7 @@ class WorkbenchBridge(QObject):
         file_path: str = "outputs/latest/current_project.f2dw.json",
     ) -> bool:
         try:
+            self._reset_agent_workflow_state()
             path = Path(file_path)
             self.current_project = load_workbench_project(path)
             self.project_path = str(path)
@@ -3019,12 +3187,108 @@ class WorkbenchBridge(QObject):
             failure_prefix="求解失败",
         )
 
-    def _launch_worker(self, task, *, success_handler, failure_prefix: str) -> None:
+    def _build_agent_workflow_payload(self, state, progress_callback) -> dict[str, object]:
+        solution_payload = None
+        execution_result = state.execution_result
+        if (
+            state.status == WorkflowStatus.COMPLETED
+            and execution_result is not None
+            and execution_result.success
+            and isinstance(execution_result.solve_result, WorkbenchSolveResult)
+        ):
+            progress_callback(70, "Agent 求解完成，正在生成结果与云图", "agent_result")
+            solution_payload = self._build_agent_solution_payload(
+                execution_result.solve_result,
+                progress_callback,
+            )
+        return {"state": state, "solution_payload": solution_payload}
+
+    def _build_agent_solution_payload(
+        self,
+        solution: WorkbenchSolveResult,
+        progress_callback,
+    ) -> dict[str, object]:
+        node_rows = build_node_displacement_rows(solution)
+        element_rows = build_element_result_rows(solution)
+        summary = build_result_summary(solution)
+        cache_payload = self._build_solution_cache_payload(
+            solution,
+            node_rows,
+            element_rows,
+            progress_callback,
+        )
+        session_cache_dir = create_contour_cache_dir(self._session_cache_id)
+        clear_contour_cache_dir(session_cache_dir)
+        session_cache_dir.mkdir(parents=True, exist_ok=True)
+        image_warning = ""
+        image_map: dict[str, dict[str, str]] = {}
+        try:
+            progress_callback(94, "预渲染 Agent 求解结果云图", "agent_contour")
+            image_map = generate_contour_images(
+                output_dir=session_cache_dir,
+                deformation_data=cache_payload["deformation_data"],
+                displacement_data=cache_payload["displacement_data"],
+                stress_exact_data=cache_payload["stress_exact_data"],
+                stress_smooth_data=cache_payload["stress_smooth_data"],
+            )
+            image_cache_valid = True
+        except Exception as exc:
+            image_warning = str(exc)
+            image_cache_valid = False
+        progress_callback(100, "Agent 工作流完成", "agent_result")
+        return {
+            "solution": solution,
+            "mesh": solution.mesh,
+            "node_rows": node_rows,
+            "element_rows": element_rows,
+            "summary": summary,
+            "node_rows_json": cache_payload["node_rows_json"],
+            "element_rows_json": cache_payload["element_rows_json"],
+            "deformation_preview_json": cache_payload["deformation_preview_json"],
+            "displacement_contour_json": cache_payload["displacement_contour_json"],
+            "stress_contour_json": cache_payload["stress_contour_json"],
+            "stress_contour_exact_json": cache_payload["stress_contour_exact_json"],
+            "stress_contour_smooth_json": cache_payload["stress_contour_smooth_json"],
+            "contour_image_cache_dir": str(session_cache_dir),
+            "contour_image_cache_json": build_contour_image_cache_json(image_map),
+            "contour_image_cache_valid": image_cache_valid,
+            "contour_image_warning": image_warning,
+        }
+
+    def _launch_agent_task(self, task, *, success_handler, failure_prefix: str) -> None:
+        """Run the Agent chain on Qt's main thread because Gmsh installs signals.
+
+        Gmsh's Python initialization calls ``signal.signal`` and therefore cannot run
+        inside the QThread used by ordinary solve workers.  A zero-delay Qt callback
+        keeps button handling asynchronous while preserving the required main thread.
+        """
+        def run() -> None:
+            try:
+                payload = task(self._handle_worker_progress)
+            except Exception as exc:
+                self._handle_agent_worker_failed(f"{failure_prefix}: {exc}")
+                return
+            success_handler(payload)
+
+        if _USE_FALLBACK:
+            run()
+        else:
+            QTimer.singleShot(0, run)
+
+    def _launch_worker(
+        self,
+        task,
+        *,
+        success_handler,
+        failure_prefix: str,
+        failure_handler=None,
+    ) -> None:
+        resolved_failure_handler = failure_handler or self._handle_worker_failed
         if _USE_FALLBACK:
             try:
                 payload = task(self._handle_worker_progress)
             except Exception as exc:
-                self._handle_worker_failed(f"{failure_prefix}: {exc}")
+                resolved_failure_handler(f"{failure_prefix}: {exc}")
                 return
             success_handler(payload)
             return
@@ -3035,7 +3299,9 @@ class WorkbenchBridge(QObject):
         worker.moveToThread(thread)
         worker.progressChanged.connect(self._handle_worker_progress)
         worker.finished.connect(success_handler)
-        worker.failed.connect(lambda message: self._handle_worker_failed(f"{failure_prefix}: {message}"))
+        worker.failed.connect(
+            lambda message: resolved_failure_handler(f"{failure_prefix}: {message}")
+        )
         worker.finished.connect(self._on_worker_finished_cleanup)
         worker.failed.connect(self._on_worker_failed_cleanup)
         thread.started.connect(worker.run)
@@ -3079,6 +3345,140 @@ class WorkbenchBridge(QObject):
 
     def _handle_worker_progress(self, progress: int, message: str, stage: str) -> None:
         self._update_busy(progress, message, stage, indeterminate=False)
+
+    def _set_agent_running_state(self, stage: str) -> None:
+        self._agent_status = WorkflowStatus.RUNNING.value
+        self._agent_stage = str(stage)
+        self.agentStateChanged.emit()
+
+    def _handle_agent_worker_failed(self, message: str) -> None:
+        self._cleanup_worker()
+        self._agent_status = WorkflowStatus.FAILED.value
+        self._agent_stage = "FAILED"
+        self._finish_busy()
+        self._set_status_text(str(message))
+        self.agentStateChanged.emit()
+
+    def _apply_agent_workflow_payload(self, payload: dict[str, object]) -> None:
+        self._cleanup_worker()
+        state = payload["state"]
+        self._apply_agent_state(state)
+        solution_payload = payload.get("solution_payload")
+        if isinstance(solution_payload, dict):
+            self._apply_solve_payload(solution_payload)
+            self._set_status_text("Agent 工作流完成，可在“求解结果”中查看结果与云图")
+        else:
+            self._finish_busy()
+            if state.status == WorkflowStatus.WAITING_APPROVAL:
+                self._set_status_text("Reviewer 已生成 RepairProposal，请确认或拒绝")
+            elif state.status == WorkflowStatus.WAITING_USER_INPUT:
+                self._set_status_text("Agent 正在等待新的自然语言修改说明")
+            elif state.status == WorkflowStatus.FAILED:
+                self._set_status_text("Agent 工作流失败，请查看诊断信息")
+
+    def _apply_agent_state(self, state) -> None:
+        self.current_project = state.project
+        self.project_dirty = True
+        self._agent_status = state.status.value
+        self._agent_stage = state.current_stage.value
+        review = state.review_result
+        if review is None:
+            self._agent_diagnosis = ""
+            self._agent_evidence = ""
+            proposals: list[dict[str, object]] = []
+        else:
+            self._agent_diagnosis = review.diagnosis
+            self._agent_evidence = "\n".join(f"• {item}" for item in review.evidence)
+            proposals = [proposal.to_dict() for proposal in review.proposals]
+        self._agent_repair_proposals_json = json.dumps(proposals, ensure_ascii=False)
+        self._agent_repair_proposals_text = "\n\n".join(
+            f"{index + 1}. {row['title']}\n{row['reason']}"
+            for index, row in enumerate(proposals)
+        )
+        self._update_agent_geometry_safety_warning(state.project)
+
+        self._clear_solution()
+        self.current_sketch_mesh = state.current_mesh
+        self.current_mesh_type = "sketch_quality" if state.current_mesh is not None else "none"
+        self._sync_instances_from_project()
+        self._sync_parts_from_project()
+        if self.current_project.parts:
+            self._sync_parameter_cache_from_project()
+        self._sync_sketch_from_active_part()
+        self._sync_sketch_mesh_from_current_mesh()
+        self._sync_material_state_from_project()
+        self._sync_boundary_load_state_from_project()
+        self.projectChanged.emit()
+        self.resultChanged.emit()
+        self.agentStateChanged.emit()
+
+    def _capture_agent_geometry_safety_context(self, project: EngineeringProject) -> None:
+        managed_bc_ids = {
+            str(item) for item in project.metadata.get("agent_boundary_condition_ids", [])
+        }
+        managed_load_ids = {str(item) for item in project.metadata.get("agent_load_ids", [])}
+        self._agent_had_user_definitions = any(
+            row.id not in managed_bc_ids for row in project.boundary_conditions
+        ) or any(row.id not in managed_load_ids for row in project.loads)
+        self._agent_previous_geometry = self._active_geometry_snapshot(project)
+        self._agent_safety_warning = ""
+        self.agentStateChanged.emit()
+
+    def _create_agent_workflow(
+        self,
+        project: EngineeringProject,
+    ) -> WorkflowOrchestrator:
+        diagnostics = llm_environment_diagnostics()
+        print(
+            "[AGENT LLM] "
+            f"provider={diagnostics['provider'] or '<empty>'} "
+            f"model={diagnostics['model'] or '<empty>'} "
+            f"base_url={diagnostics['base_url'] or '<empty>'} "
+            f"api_key={diagnostics['api_key']}",
+            flush=True,
+        )
+        if self._llm_client_factory is not None:
+            return self._workflow_factory(
+                project,
+                llm_client=self._llm_client_factory(),
+                max_retries=2,
+            )
+        config = LLMProviderConfig.from_env()
+        return self._workflow_factory(project, config=config, max_retries=2)
+
+    def _reset_agent_workflow_state(self) -> None:
+        self._agent_orchestrator = None
+        self._agent_status = WorkflowStatus.IDLE.value
+        self._agent_stage = "ARCHITECT"
+        self._agent_diagnosis = ""
+        self._agent_evidence = ""
+        self._agent_repair_proposals_json = "[]"
+        self._agent_repair_proposals_text = ""
+        self._agent_safety_warning = ""
+        self._agent_had_user_definitions = False
+        self._agent_previous_geometry = None
+        self.agentStateChanged.emit()
+
+    def _update_agent_geometry_safety_warning(self, project: EngineeringProject) -> None:
+        current_geometry = self._active_geometry_snapshot(project)
+        geometry_changed = current_geometry != self._agent_previous_geometry
+        if geometry_changed and self._agent_had_user_definitions:
+            self._agent_safety_warning = (
+                "几何拓扑已发生变化。原有手工边界条件或载荷未被 Agent 静默删除，"
+                "其物理目标可能已经失效，请重新确认。"
+            )
+        else:
+            self._agent_safety_warning = ""
+
+    @staticmethod
+    def _active_geometry_snapshot(project: EngineeringProject) -> dict[str, object] | None:
+        active_part_id = str(project.metadata.get("active_part_id", ""))
+        part = project.get_part_by_id(active_part_id) if active_part_id else None
+        if part is None and len(project.parts) == 1:
+            part = project.parts[0]
+        if part is None:
+            return None
+        return part.geometry.to_dict()
 
     def _handle_worker_failed(self, message: str) -> None:
         self._cleanup_worker()

@@ -790,6 +790,19 @@ ApplicationWindow {
         }
     }
 
+    function agentProposalTitles() {
+        try {
+            var rows = JSON.parse(bridge.agentRepairProposalsJson || "[]")
+            var titles = []
+            for (var i = 0; i < rows.length; i++) {
+                titles.push((i + 1) + ". " + String(rows[i].title || "RepairProposal"))
+            }
+            return titles
+        } catch (error) {
+            return []
+        }
+    }
+
     function mouseXInWorkspace(item, mouseX, mouseY) {
         return item.mapToItem(mainWorkspaceRow, mouseX, mouseY).x
     }
@@ -2259,6 +2272,161 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: agentDialog
+        modal: false
+        parent: Overlay.overlay
+        width: Math.min(760, root.width - 80)
+        height: Math.min(720, root.height - 80)
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        title: "Fem2dWorkbench Agent 1.0"
+        closePolicy: Popup.CloseOnEscape
+        standardButtons: Dialog.NoButton
+
+        contentItem: ScrollView {
+            clip: true
+
+            ColumnLayout {
+                width: Math.max(0, agentDialog.width - 44)
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "状态：" + bridge.agentStatus
+                        font.bold: true
+                        color: root.uiTextColor
+                    }
+                    Label {
+                        text: "阶段：" + bridge.agentStage
+                        color: root.uiMutedTextColor
+                    }
+                    Item { Layout.fillWidth: true }
+                    WorkbenchButton {
+                        text: "关闭"
+                        Layout.preferredWidth: 72
+                        onClicked: agentDialog.close()
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: safetyWarningText.implicitHeight + 20
+                    visible: bridge.agentSafetyWarning !== ""
+                    radius: root.uiControlRadius
+                    color: "#FFF7ED"
+                    border.color: "#FDBA74"
+                    Label {
+                        id: safetyWarningText
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        text: bridge.agentSafetyWarning
+                        wrapMode: Text.WordWrap
+                        color: "#9A3412"
+                    }
+                }
+
+                Label {
+                    text: bridge.agentCanRevise ? "修改说明" : "自然语言仿真需求"
+                    font.bold: true
+                    color: root.uiTextColor
+                }
+                WorkbenchTextArea {
+                    id: agentPromptInput
+                    objectName: "agentPromptInput"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 130
+                    enabled: !bridge.isBusy && !bridge.agentNeedsApproval
+                    placeholderText: "例如：创建 100×50 矩形，钢材 E=210000、ν=0.3，左边完全固定，右边施加 [100,0] 均布载荷，网格尺寸 5，求 von Mises 应力。"
+                }
+                WorkbenchButton {
+                    id: agentStartButton
+                    objectName: "agentStartButton"
+                    Layout.fillWidth: true
+                    text: bridge.agentCanRevise ? "提交修改并重新执行" : "启动 Agent 工作流"
+                    visualRole: "strongPrimary"
+                    enabled: !bridge.isBusy && !bridge.agentNeedsApproval && agentPromptInput.text.trim() !== ""
+                    onClicked: bridge.startAgentWorkflow(agentPromptInput.text)
+                }
+
+                Label {
+                    visible: bridge.agentDiagnosis !== ""
+                    text: "Reviewer diagnosis"
+                    font.bold: true
+                    color: root.uiTextColor
+                }
+                WorkbenchTextArea {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 76
+                    visible: bridge.agentDiagnosis !== ""
+                    readOnly: true
+                    text: bridge.agentDiagnosis
+                }
+                Label {
+                    visible: bridge.agentEvidence !== ""
+                    text: "Evidence"
+                    font.bold: true
+                    color: root.uiTextColor
+                }
+                WorkbenchTextArea {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 82
+                    visible: bridge.agentEvidence !== ""
+                    readOnly: true
+                    text: bridge.agentEvidence
+                }
+
+                Label {
+                    visible: bridge.agentNeedsApproval
+                    text: "RepairProposal"
+                    font.bold: true
+                    color: root.uiTextColor
+                }
+                WorkbenchComboBox {
+                    id: agentProposalCombo
+                    Layout.fillWidth: true
+                    visible: bridge.agentNeedsApproval
+                    model: root.agentProposalTitles()
+                }
+                WorkbenchTextArea {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 100
+                    visible: bridge.agentNeedsApproval
+                    readOnly: true
+                    text: bridge.agentRepairProposalsText
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: bridge.agentNeedsApproval
+                    WorkbenchButton {
+                        Layout.fillWidth: true
+                        text: "Confirm 并重试"
+                        visualRole: "strongPrimary"
+                        enabled: !bridge.isBusy && agentProposalCombo.currentIndex >= 0
+                        onClicked: bridge.confirmAgentRepair(agentProposalCombo.currentIndex)
+                    }
+                    WorkbenchButton {
+                        Layout.fillWidth: true
+                        text: "Reject，返回修改"
+                        visualRole: "danger"
+                        enabled: !bridge.isBusy
+                        onClicked: bridge.rejectAgentRepair()
+                    }
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: bridge
+        function onAgentStateChanged() {
+            if (bridge.agentStatus === "COMPLETED") {
+                root.switchMode("求解结果")
+            }
+        }
+    }
+
+    Dialog {
         id: materialEditorDialog
         title: "材料编辑器"
         modal: true
@@ -2862,6 +3030,17 @@ ApplicationWindow {
                     }
 
                     Item { Layout.fillWidth: true }
+
+                    WorkbenchButton {
+                        Layout.preferredHeight: root.uiButtonHeight
+                        leftPadding: root.uiButtonHPadding
+                        rightPadding: root.uiButtonHPadding
+                        font.pixelSize: 12
+                        text: "Agent 1.0"
+                        visualRole: "strongPrimary"
+                        enabled: !bridge.isBusy
+                        onClicked: agentDialog.open()
+                    }
 
                     WorkbenchButton {
                         Layout.preferredHeight: root.uiButtonHeight
